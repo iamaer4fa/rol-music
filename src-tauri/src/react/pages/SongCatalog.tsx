@@ -31,7 +31,7 @@ export default function SongCatalog() {
   async function loadSongs() {
     setLoading(true)
     try {
-      let query = supa.from('songs').select('*, tags:tags!inner (tag_name)').eq('team_id', teamId).eq('is_active', true)
+      let query = supa.from('songs').select('*, tags:song_tags!inner (id, tag_name)').eq('team_id', teamId).eq('is_active', true)
 
       if (searchQuery) {
         query = query.or(`title.ilike.%${searchQuery}%,artist.ilike.%${searchQuery}%`)

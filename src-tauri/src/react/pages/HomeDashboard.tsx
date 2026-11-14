@@ -88,7 +88,7 @@ export default function HomeDashboard() {
         // Fetch recent announcements
         const { data: posts, error: postsError } = await supa
           .from('team_posts')
-          .select('*, author:auth.users!author_id (display_name)')
+          .select('*, author:profiles!team_posts_author_id_fkey (display_name)')
           .eq('team_id', teamId)
           .order('created_at', { ascending: false })
           .limit(5)

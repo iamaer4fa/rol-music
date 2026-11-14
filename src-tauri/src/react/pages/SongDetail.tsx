@@ -18,7 +18,7 @@ export default function SongDetail() {
       try {
         const { data, error } = await supa
           .from('songs')
-          .select('*, tags:tags!inner (tag_name), arrangements:arrangements (*)')
+          .select('*, tags:song_tags (id, tag_name), arrangements:song_arrangements (*)')
           .eq('id', id)
           .eq('team_id', localStorage.getItem('team_id'))
           .single()

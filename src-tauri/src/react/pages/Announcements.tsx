@@ -29,7 +29,7 @@ export default function Announcements() {
     try {
       const { data, error } = await supa
         .from('team_posts')
-        .select('*, author:auth.users!author_id (display_name)')
+        .select('*, author:profiles!team_posts_author_id_fkey (display_name)')
         .eq('team_id', teamId)
         .eq('post_type', 'announcement')
         .order('created_at', { ascending: false })
