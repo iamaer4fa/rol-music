@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/use-auth'
 import '../App.css'
 
@@ -15,30 +15,13 @@ import Settings from './Settings'
 
 function AppRoutes() {
   const { user, loading, signOut } = useAuth()
+  const { pathname } = useLocation()
 
   if (loading) {
-    return <div>Loading...</div>
+    return <div className="app-loading">Loading your workspace...</div>
   }
 
-  return (
-    <>
-      {user && (
-        <nav className="app-nav">
-          <span className="app-title">ROL Worship Team</span>
-          <div className="app-nav-links">
-            <Link to="/">Home</Link>
-            <Link to="/catalog">Songs</Link>
-            <Link to="/lineup">Lineup</Link>
-            <Link to="/announcements">Announcements</Link>
-            <Link to="/overview">Practice overview</Link>
-            <Link to="/settings">Settings</Link>
-          </div>
-          <div className="app-nav-right">
-            <span className="app-user-name">{user.email?.split('@')[0] || 'Member'}</span>
-            <button onClick={signOut} className="btn-signout">Sign Out</button>
-          </div>
-        </nav>
-      )}
+  const routes = (
       <Routes>
         <Route path="/signin" element={user ? <Navigate to="/" replace /> : <SignIn />} />
         <Route path="/" element={user ? <HomeDashboard /> : <Navigate to="/signin" replace />} />
@@ -51,7 +34,61 @@ function AppRoutes() {
         <Route path="/settings" element={user ? <Settings /> : <Navigate to="/signin" replace />} />
         <Route path="*" element={<Navigate to={user ? '/' : '/signin'} replace />} />
       </Routes>
-    </>
+  )
+
+  if (!user) return routes
+
+  const navItems = [
+    { to: '/', label: 'Home', end: true },
+    { to: '/catalog', label: 'Songs' },
+    { to: '/lineup', label: 'Lineup' },
+    { to: '/announcements', label: 'Updates' },
+    { to: '/overview', label: 'Practice' },
+    { to: '/settings', label: 'Settings' },
+  ]
+
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <NavLink to="/" className="app-brand" aria-label="ROL Worship Team home">
+          <span className="app-brand-mark" aria-hidden="true">R</span>
+          <span>ROL Worship Team</span>
+        </NavLink>
+        <div className="app-header-actions">
+          <div className="app-user-chip">
+            <span className="app-avatar" aria-hidden="true">
+              {(user.email?.trim()[0] || 'M').toUpperCase()}
+            </span>
+            <span className="app-user-name">{user.email || 'Member'}</span>
+          </div>
+          <button onClick={signOut} className="btn-signout">Sign out</button>
+        </div>
+      </header>
+      <div className="app-workspace">
+        <aside className="app-sidebar">
+          <p className="app-sidebar-label">Workspace</p>
+          <nav className="app-nav-links" aria-label="Main navigation">
+            {navItems.map(({ to, label, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end ?? false}
+                className={({ isActive }) =>
+                  isActive || (to === '/overview' && pathname.startsWith('/practice/'))
+                    ? 'app-nav-link active'
+                    : 'app-nav-link'
+                }
+              >
+                {label}
+              </NavLink>
+            ))}
+          </nav>
+        </aside>
+        <main className="app-main" id="main-content">
+          {routes}
+        </main>
+      </div>
+    </div>
   )
 }
 

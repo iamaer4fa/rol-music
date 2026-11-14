@@ -1,10 +1,10 @@
 //! # Synchronization Module
-//! 
+//!
 //! Minimal synchronization between local and remote storage.
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::Utc;
 
 /// A practice session record for synchronization
 #[derive(Debug, Clone, Serialize)]

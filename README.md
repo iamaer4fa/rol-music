@@ -1,8 +1,9 @@
 # ROL Worship Team
+## This is pre-Alpha software, do not use in production live environments.
 
 ROL Worship Team is a desktop application for preparing and practicing music together. It uses Tauri v2 and Rust for the desktop shell, React and TypeScript for the interface, and Supabase for authentication and shared team data.
 
-The app currently includes sign-in, a home dashboard, a song catalog and song details, weekly lineups, practice, announcements, a practice overview, and team settings. Supabase PostgreSQL is the shared source of team data, with Row-Level Security (RLS) policies enforcing team and role access.
+The app includes sign-in, a home dashboard, a song catalog and song details, weekly lineups, audio practice, announcements, a practice overview, and team settings. Worship Leaders manage catalog songs and draft lineups; active team members can contribute shared media and arrangements. Supabase PostgreSQL is the shared source of team data, with Row-Level Security (RLS) policies enforcing team and role access.
 
 ## Requirements
 
@@ -28,10 +29,11 @@ See the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) for 
 
 3. For a new database, apply [`src-tauri/src/db/20241111_initial_schema.sql`](src-tauri/src/db/20241111_initial_schema.sql) once using the Supabase SQL Editor or your migration workflow. This creates the tables and RLS policies; the application does not run this migration automatically.
 4. Create an Auth user, then bootstrap that user with a profile, team, active `team_members` row, and `team_settings` row using a privileged setup path such as the SQL Editor. Assign an application access role (`worship_leader`, `worship_team_director`, or `member`); musical roles are separate. Do not rerun the initial migration on an initialized database.
+5. Apply [`src-tauri/src/db/20261114_team_audio_and_member_arrangements.sql`](src-tauri/src/db/20261114_team_audio_and_member_arrangements.sql) once after the initial schema. It keeps media and arrangement access team-scoped, permits active team members to add contributions, and creates the private `team-audio` Storage bucket. It does not allow members to edit songs or change their application access roles.
 
 ### Load demo content
 
-To populate a configured team for testing, run [`src-tauri/src/db/demo_seed.sql`](src-tauri/src/db/demo_seed.sql) in the Supabase SQL Editor after the initial schema and team bootstrap are in place. It adds five original demo songs, tags, arrangements, a published lineup, an announcement, and a sample song comment. The seed can be rerun safely; it does not create fake practice sessions or enable practice sharing.
+To populate a configured team for testing, run [`src-tauri/src/db/demo_seed.sql`](src-tauri/src/db/demo_seed.sql) in the Supabase SQL Editor after the initial schema and team bootstrap are in place. It adds five public-domain hymns (including “Amazing Grace”), tags, arrangements, a published lineup, an announcement, and a sample song comment. Rerunning the updated seed replaces the five prior demo songs and updates their seeded arrangements and lineup in place; it does not create fake practice sessions or enable practice sharing.
 
 ## Install, run, and build
 
@@ -52,6 +54,25 @@ npx tauri build
 ```
 
 Tauri bundles are written under `src-tauri/target/release/bundle/`. Build on the target operating system and install the platform prerequisites above.
+Linux artifact basenames use the lowercase `rol_worship_team` product name; the application window continues to display “ROL Worship Team”.
+
+To uninstall the Debian package, use its package ID (not the display name or `.deb` filename):
+
+```sh
+sudo apt remove rol-worship-team
+```
+
+Use `sudo apt purge rol-worship-team` to also remove package-managed configuration files. This does not remove per-user application data.
+
+## Practice and lineup behavior
+
+- Practice timing uses a Rust monotonic clock and counts only normally advancing local audio playback. Pauses, buffering, seeks, stalls, and sampling gaps over two seconds are excluded.
+- Completed practice sessions are kept in a SQLite database under Tauri's application-data directory. Sharing is opt-in; pending sessions sync only with consent and network access. Disabling sharing makes pending local sessions private. Remote practice records are append-only and duplicate session IDs are checked against the full payload.
+- Song details allow active team members to add YouTube/Spotify links, direct audio links, private shared audio uploads (up to 100 MB), and named arrangements with key metadata. Shared audio is available only to active members of that song's team.
+- YouTube and Spotify use their provider players; external playback is not measured as practice time. Use an uploaded/local audio file or playable direct audio URL for the in-app speed and A-B loop controls and measured playback sessions. Selecting an arrangement updates its displayed key/capo/tempo metadata; automatic chord transposition is not implemented.
+- Published lineups are read-only in the app. Make a replacement draft to correct a published lineup.
+
+The current database schema does not yet store song/arrangement snapshots on published lineup items, so a catalog change made outside the app can change how an older published lineup is displayed. The app also does not yet cache songs and lineups for offline browsing; offline playback requires the audio file to be available locally.
 
 ## Project layout
 

@@ -80,9 +80,11 @@ Use:
 - **WaveSurfer.js** for audio visualization and practice-player features where appropriate.
 - Local MP3 and WAV files as the primary audio sources for the first release.
 
-External media links, including YouTube links, may be associated with songs. Open external links in the browser when direct embedding or playback is unavailable or restricted.
+External media links, including YouTube and Spotify links, may be associated with songs. Embed provider players when permitted; open external links in the browser when embedding or playback is unavailable or restricted. External provider playback is not measured as practice time.
 
 Do not promise reliable A-B looping, playback-speed adjustment, or practice-time tracking for external streaming services. Those features must work with locally accessible audio files.
+
+Active team members may contribute shared audio uploads to a private, team-scoped Supabase Storage bucket. Preserve team membership checks for upload and playback access. Members may also select a local file that remains available only on their device.
 
 ### Security rules
 
@@ -246,7 +248,7 @@ Include:
 
 Allow more than one media reference per song.
 
-Do not assume that all members have the same local audio-file paths. Each member may associate their own local audio file with a shared song.
+Do not assume that all members have the same local audio-file paths. Each member may select their own local audio file for a shared song, or contribute a team-shared Storage upload. Store only the Storage object reference in the media row, not a long-lived public URL.
 
 ### 3.8 Song Tags
 

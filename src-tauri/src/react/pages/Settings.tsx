@@ -1,161 +1,304 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import '../App.css'
 
+const weekdays = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+]
+
 export default function Settings() {
-  const { user } = useAuth()
-  const [teamId, setTeamId] = useState('')
-  const [practiceSharingEnabled, setPracticeSharingEnabled] = useState(false)
+  const {
+    user,
+    teamId,
+    accessRole,
+    musicalRoles,
+    practiceSharingEnabled,
+    setPracticeSharingEnabled,
+  } = useAuth()
+  const isLeader = accessRole === 'worship_leader'
+  const [displayName, setDisplayName] = useState('')
+  const [preferredInstrument, setPreferredInstrument] = useState('')
   const [ianaTimezone, setIanaTimezone] = useState('Asia/Manila')
+  const [weekStartsOn, setWeekStartsOn] = useState(1)
   const [serviceDayOfWeek, setServiceDayOfWeek] = useState(7)
   const [serviceCutoffTime, setServiceCutoffTime] = useState('09:00')
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!user?.id) return
-
-    const init = async () => {
-      const tid = localStorage.getItem('team_id')
-      if (tid) {
-        setTeamId(tid)
-        await loadTeamSettings()
-      }
+    const currentUser = user
+    const currentUserId = currentUser?.id
+    const fallbackName =
+      currentUser?.user_metadata?.full_name ?? currentUser?.email?.split('@')[0] ?? ''
+    if (!currentUserId || !teamId) {
       setLoading(false)
+      return
     }
 
-    init()
-  }, [user?.id])
+    let cancelled = false
+    async function loadSettings() {
+      setLoading(true)
+      setError(null)
+      try {
+        const [profileResult, teamResult] = await Promise.all([
+          supa
+            .from('profiles')
+            .select('display_name, preferred_instrument')
+            .eq('id', currentUserId)
+            .maybeSingle(),
+          supa
+            .from('team_settings')
+            .select('iana_timezone, week_starts_on, service_day_of_week, service_cutoff_time')
+            .eq('team_id', teamId)
+            .maybeSingle(),
+        ])
 
-  async function loadTeamSettings() {
-    try {
-      const { data, error } = await supa
-        .from('team_settings')
-        .select('*')
-        .eq('team_id', teamId)
-        .single()
+        if (profileResult.error) throw profileResult.error
+        if (teamResult.error) throw teamResult.error
+        if (cancelled) return
 
-      if (!error && data) {
-        setIanaTimezone(data.iana_timezone || 'Asia/Manila')
-        setServiceDayOfWeek(data.service_day_of_week || 7)
-        setServiceCutoffTime(data.service_cutoff_time || '09:00')
-        // practice_sharing_enabled is on team_members, not team_settings
-        // We'll check that separately
+        setDisplayName(
+          profileResult.data?.display_name ??
+            fallbackName
+        )
+        setPreferredInstrument(profileResult.data?.preferred_instrument ?? '')
+        setIanaTimezone(teamResult.data?.iana_timezone ?? 'Asia/Manila')
+        setWeekStartsOn(teamResult.data?.week_starts_on ?? 1)
+        setServiceDayOfWeek(teamResult.data?.service_day_of_week ?? 7)
+        setServiceCutoffTime((teamResult.data?.service_cutoff_time ?? '09:00').slice(0, 5))
+      } catch (loadError) {
+        console.error('Error loading settings:', loadError)
+        if (!cancelled) setError('Unable to load your settings. Please try again.')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-    } catch (err) {
-      console.error('Error loading team settings:', err)
-      setError('Failed to load team settings')
+    }
+
+    void loadSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, teamId])
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!user?.id || !teamId) return
+
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: ianaTimezone }).format()
+    } catch {
+      setError('Enter a valid IANA timezone, such as Asia/Manila.')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const { data: existingProfile, error: profileReadError } = await supa
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (profileReadError) throw profileReadError
+
+      const profileSave = existingProfile
+        ? await supa
+            .from('profiles')
+            .update({
+              display_name: displayName.trim() || null,
+              preferred_instrument: preferredInstrument.trim() || null,
+            })
+            .eq('id', user.id)
+            .select('id')
+            .maybeSingle()
+        : await supa.from('profiles').insert({
+            id: user.id,
+            display_name: displayName.trim() || null,
+            preferred_instrument: preferredInstrument.trim() || null,
+          }).select('id').single()
+      if (profileSave.error) throw profileSave.error
+      if (!profileSave.data) throw new Error('Profile settings were not saved.')
+
+      if (isLeader) {
+        const { data: savedTeamSettings, error: teamError } = await supa
+          .from('team_settings')
+          .update({
+            iana_timezone: ianaTimezone.trim(),
+            week_starts_on: weekStartsOn,
+            service_day_of_week: serviceDayOfWeek,
+            service_cutoff_time: serviceCutoffTime,
+          })
+          .eq('team_id', teamId)
+          .select('team_id')
+          .maybeSingle()
+        if (teamError) throw teamError
+        if (!savedTeamSettings) throw new Error('Team settings were not saved.')
+      }
+
+      setNotice('Settings saved.')
+    } catch (saveError) {
+      console.error('Error saving settings:', saveError)
+      setError('Unable to save settings. Check your permissions and try again.')
+    } finally {
+      setSaving(false)
     }
   }
 
-  const togglePracticeSharing = async () => {
-    const { error } = await supa
-      .from('team_members')
-      .update({ practice_sharing_enabled: !practiceSharingEnabled })
-      .eq('user_id', user?.id)
-      .eq('team_id', teamId)
-
-    if (!error) {
-      setPracticeSharingEnabled(!practiceSharingEnabled)
-      if (!practiceSharingEnabled) {
-        setError('Practice sharing disabled. Your practice history will remain private.')
-      }
-    } else {
-      setError('Failed to update practice sharing preference')
+  async function changePracticeSharing(enabled: boolean) {
+    setError(null)
+    setNotice(null)
+    if (enabled) {
+      const accepted = window.confirm(
+        'Practice sharing is optional. If you enable it, completed practice session details (song, date, duration, playback speed, and loop information) may be shared with your Worship Leader and Worship Team Director for team and song summaries. These reports do not prove attention, attendance, or musical performance. You can turn sharing off at any time. Previously shared server records are retained but become hidden from leadership by the database policies. Private local sessions will not be uploaded automatically.\n\nDo you consent to share new practice activity?'
+      )
+      if (!accepted) return
     }
+
+    try {
+      await setPracticeSharingEnabled(enabled)
+      setNotice(
+        enabled
+          ? 'Practice sharing enabled for new sessions. Existing private history remains local.'
+          : 'Practice sharing disabled. New and pending sessions remain local; previously shared server records are retained and hidden from leadership.'
+      )
+    } catch (sharingError) {
+      console.error('Error updating practice sharing:', sharingError)
+      setError('Unable to update your practice-sharing preference.')
+    }
+  }
+
+  if (loading) {
+    return <div className="page-container">Loading settings...</div>
   }
 
   return (
     <div className="page-container">
       <h2>Settings</h2>
+      {error && <p className="error-message" role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h3>Practice Sharing</h3>
-        <p>
+      <form onSubmit={saveSettings}>
+        <section className="card">
+          <h3>Profile</h3>
+          <label>
+            Display name
+            <input
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              maxLength={255}
+              autoComplete="name"
+            />
+          </label>
+          <label>
+            Preferred instrument
+            <input
+              value={preferredInstrument}
+              onChange={(event) => setPreferredInstrument(event.target.value)}
+              maxLength={255}
+              placeholder="For example, keyboard"
+            />
+          </label>
+          <p>Musical roles: {musicalRoles.length ? musicalRoles.join(', ') : 'Not assigned'}</p>
+        </section>
+
+        <section className="card">
+          <h3>Practice Privacy</h3>
           <label>
             <input
               type="checkbox"
               checked={practiceSharingEnabled}
-              onChange={togglePracticeSharing}
+              onChange={(event) => void changePracticeSharing(event.target.checked)}
             />
             Share my practice activity with team leadership
           </label>
-        </p>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <p style={{ fontSize: '0.875rem', marginTop: '0.5rem' }}>
-          When enabled, Worship Team Directors and Worship Leaders can view shared team practice records. 
-          Sharing is optional and can be changed at any time.
-        </p>
-      </div>
+          <p>
+            Sharing is optional. When enabled, Worship Leaders and Worship Team Directors can
+            view shared sessions for team and song summaries. Reports are not proof of
+            attention, attendance, or performance.
+          </p>
+          <p>
+            Turning sharing off stops new uploads and hides your previously shared sessions
+            from leadership through RLS; it does not delete append-only server records.
+            Private local history is never uploaded automatically.
+          </p>
+        </section>
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <h3>Team Timezone</h3>
-        <p>Current timezone: {ianaTimezone}</p>
-        <p>Service day of week: {serviceDayOfWeek === 7 ? 'Sunday' : serviceDayOfWeek === 1 ? 'Monday' : 'Other'}</p>
-        <p>Service cutoff time: {serviceCutoffTime}</p>
-      </div>
+        <section className="card">
+          <h3>Team Calendar</h3>
+          {isLeader ? (
+            <>
+              <label>
+                IANA timezone
+                <input
+                  value={ianaTimezone}
+                  onChange={(event) => setIanaTimezone(event.target.value)}
+                  placeholder="Asia/Manila"
+                />
+              </label>
+              <label>
+                Week starts on
+                <select
+                  value={weekStartsOn}
+                  onChange={(event) => setWeekStartsOn(Number(event.target.value))}
+                >
+                  {weekdays.map((day, index) => (
+                    <option key={day} value={index + 1}>{day}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Service day
+                <select
+                  value={serviceDayOfWeek}
+                  onChange={(event) => setServiceDayOfWeek(Number(event.target.value))}
+                >
+                  {weekdays.map((day, index) => (
+                    <option key={day} value={index + 1}>{day}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Service cutoff time
+                <input
+                  type="time"
+                  value={serviceCutoffTime}
+                  onChange={(event) => setServiceCutoffTime(event.target.value)}
+                  required
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <p>Timezone: {ianaTimezone}</p>
+              <p>Week starts on: {weekdays[weekStartsOn - 1]}</p>
+              <p>Service day: {weekdays[serviceDayOfWeek - 1]}</p>
+              <p>Service cutoff: {serviceCutoffTime}</p>
+            </>
+          )}
+        </section>
 
-      <div className="card">
-        <h3>Musical Roles</h3>
-        <p>Select your instruments (this doesn't grant application permissions):</p>
-        <ul>
-          <li>
-            <label>
-              <input type="checkbox" defaultChecked /> Lead Guitar
-            </label>
-          </li>
-          <li>
-            <label>
-              <input type="checkbox" defaultChecked /> Rhythm Guitar
-            </label>
-          </li>
-          <li>
-            <label>
-              <input type="checkbox" defaultChecked /> Keyboard
-            </label>
-          </li>
-          <li>
-            <label>
-              <input type="checkbox" defaultChecked /> Bass
-            </label>
-          </li>
-          <li>
-            <label>
-              <input type="checkbox" defaultChecked /> Backup Vocals
-            </label>
-          </li>
-          <li>
-            <label>
-              <input type="checkbox" defaultChecked /> Drums
-            </label>
-          </li>
-          <li>
-            <label>
-              <input type="checkbox" /> Other
-            </label>
-          </li>
-        </ul>
-      </div>
+        <div style={{ marginTop: '1.5rem' }}>
+        <button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
+        </div>
+      </form>
 
-      <div className="card">
+      <section className="card">
         <h3>Team Information</h3>
-        <p>Team ID: {teamId}</p>
-        <p>IANA Timezone: {ianaTimezone}</p>
-        <p>Week starts on: Monday (default)</p>
-        <p>Service day: {serviceDayOfWeek === 7 ? 'Sunday' : serviceDayOfWeek === 1 ? 'Monday' : 'Custom'}</p>
-        <p>Service cutoff: {serviceCutoffTime} (default 09:00)</p>
-      </div>
-
-      <div style={{ marginTop: '2rem' }}>
-        <button onClick={() => window.alert('Settings saved')} className="btn-primary">
-          Save Changes
-        </button>
-        <button style={{ marginLeft: '0.5rem' }} onClick={() => window.alert('Cancel')}>
-
-          Cancel
-        </button>
-      </div>
+        <p>Application role: {accessRole ?? 'Not assigned'}</p>
+        <p>Team ID: {teamId ?? 'Not assigned'}</p>
+      </section>
     </div>
   )
 }

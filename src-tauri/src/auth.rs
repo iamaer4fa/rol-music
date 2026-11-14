@@ -1,5 +1,5 @@
 //! # Authentication Module
-//! 
+//!
 //! Minimal authentication support using Supabase JavaScript SDK.
 
 /// Get the current user session (handled by frontend Supabase SDK)

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ROL Worship Team",
+  "productName": "rol_worship_team",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.github.iamaer4fa.rolworshipteam",
   "build": {
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist",

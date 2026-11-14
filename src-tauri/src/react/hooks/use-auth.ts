@@ -1,5 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { supa, syncPracticeSession as syncPracticeSessionToRemote, hasPracticeSharingEnabled, type PracticeSession } from '../lib/supabase'
+import { invoke } from '@tauri-apps/api/core'
+import {
+  supa,
+  syncPracticeSession as syncPracticeSessionToRemote,
+  type PracticeSession,
+  type PracticeSyncResult,
+} from '../lib/supabase'
 
 export type UserContextType = {
   user: import('@supabase/supabase-js').User | null
@@ -12,7 +18,7 @@ export type UserContextType = {
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   setPracticeSharingEnabled: (enabled: boolean) => Promise<void>
-  syncPracticeSession: (session: PracticeSession) => Promise<{ success: boolean; alreadyExists: boolean }>
+  syncPracticeSession: (session: PracticeSession) => Promise<PracticeSyncResult>
   getTeamMembership: () => Promise<{ teamId: string; role: string } | null>
 }
 
@@ -90,12 +96,7 @@ export function useAuth(): UserContextType {
       setPracticeSharingEnabledState(false)
       return
     }
-
-    fetchTeamMembership().then(async (membership) => {
-      if (membership) {
-        setPracticeSharingEnabledState(await hasPracticeSharingEnabled(user.id))
-      }
-    })
+    void fetchTeamMembership()
   }, [user?.id, fetchTeamMembership])
 
   // Sign in with email and password
@@ -125,28 +126,99 @@ export function useAuth(): UserContextType {
 
   // Toggle practice sharing
   const togglePracticeSharing = useCallback(async (enabled: boolean) => {
-    setPracticeSharingEnabledState(enabled)
-
-    if (user?.id) {
-      const { error } = await supa
-        .from('team_members')
-        .update({ practice_sharing_enabled: enabled })
-        .eq('user_id', user.id)
-
-      if (error) {
-        console.error('Error updating practice sharing:', error)
-        // Revert state on error
-        setPracticeSharingEnabledState(!enabled)
-      }
+    if (!user?.id || !teamId) {
+      throw new Error('An active team membership is required to change practice sharing.')
     }
-  }, [user?.id])
+
+    if (!enabled) {
+      await invoke('make_pending_practice_private')
+    }
+
+    const { data: updatedMembership, error } = await supa
+      .from('team_members')
+      .update({ practice_sharing_enabled: enabled })
+      .eq('user_id', user.id)
+      .eq('team_id', teamId)
+      .select('practice_sharing_enabled')
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error updating practice sharing:', error)
+      throw new Error('Unable to update practice-sharing preference.')
+    }
+    if (updatedMembership?.practice_sharing_enabled !== enabled) {
+      throw new Error('Practice-sharing preference was not updated.')
+    }
+
+    setPracticeSharingEnabledState(enabled)
+  }, [user?.id, teamId])
 
   // Sync a practice session
   const syncPracticeSession = useCallback(async (session: PracticeSession) => {
-    if (!user?.id) return { success: false, alreadyExists: false }
+    if (!user?.id || !teamId || !practiceSharingEnabled) {
+      return {
+        success: false,
+        alreadyExists: false,
+        error: 'Practice sharing is disabled or team membership is unavailable.',
+      }
+    }
+    if (session.user_id !== user.id || session.team_id !== teamId) {
+      return {
+        success: false,
+        alreadyExists: false,
+        error: 'Practice record does not match the signed-in user and active team.',
+      }
+    }
 
-    return await syncPracticeSessionToRemote(session)
-  }, [user?.id])
+    const result = await syncPracticeSessionToRemote(session)
+    await invoke('update_practice_sync_state', {
+      sessionId: session.session_id,
+      syncState: result.success ? 'synced' : 'error',
+      syncError: result.error ?? null,
+    })
+    return result
+  }, [user?.id, teamId, practiceSharingEnabled])
+
+  useEffect(() => {
+    if (!user?.id || !teamId || !practiceSharingEnabled) return
+
+    const userId = user.id
+    const activeTeamId = teamId
+    let active = true
+    async function syncPendingSessions() {
+      const sessions = await invoke<PracticeSession[]>('get_pending_practice_sessions')
+      for (const session of sessions) {
+        if (!active) return
+        if (session.user_id !== userId || session.team_id !== activeTeamId) {
+          await invoke('update_practice_sync_state', {
+            sessionId: session.session_id,
+            syncState: 'private',
+            syncError: null,
+          })
+          continue
+        }
+
+        const result = await syncPracticeSessionToRemote(session)
+        await invoke('update_practice_sync_state', {
+          sessionId: session.session_id,
+          syncState: result.success ? 'synced' : 'error',
+          syncError: result.error ?? null,
+        })
+      }
+    }
+
+    const onOnline = () => {
+      void syncPendingSessions().catch((error: unknown) => {
+        console.error('Unable to synchronize local practice records:', error)
+      })
+    }
+    if (navigator.onLine) onOnline()
+    window.addEventListener('online', onOnline)
+    return () => {
+      active = false
+      window.removeEventListener('online', onOnline)
+    }
+  }, [user?.id, teamId, practiceSharingEnabled])
 
   return {
     user,
