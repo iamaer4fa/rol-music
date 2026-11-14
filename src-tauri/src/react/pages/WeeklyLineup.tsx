@@ -5,27 +5,26 @@ import { useParams } from 'react-router-dom'
 import '../App.css'
 
 export default function WeeklyLineup() {
-  const { user, session } = useAuth()
+  const { user, teamId } = useAuth()
   const { lineupId } = useParams<{ lineupId: string }>()
   const [lineup, setLineup] = useState<{ id: string; title: string; songs: any[]; status: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!user?.id) return
+    if (!teamId) {
+      setLineup(null)
+      setLoading(false)
+      return
+    }
 
     async function loadLineup() {
       setLoading(true)
       try {
         const lid = lineupId || localStorage.getItem('current_lineup_id')
-        if (!lid) {
-          setLoading(false)
-          return
-        }
 
-        // Fetch the published lineup
-        const { data, error } = await supa
-          .from('lineups')
-          .select(`
+        const lineupQuery = () =>
+          supa.from('lineups').select(`
             *,
             lineup_items (
               *,
@@ -33,32 +32,60 @@ export default function WeeklyLineup() {
               selected_arrangement: song_arrangements (*)
             )
           `)
-          .eq('id', lid)
-          .eq('team_id', localStorage.getItem('team_id'))
-          .single()
+            .eq('team_id', teamId)
 
-        if (!error && data) {
+        let result = lid
+          ? await lineupQuery().eq('id', lid).maybeSingle()
+          : await lineupQuery()
+              .eq('status', 'published')
+              .order('service_date', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+
+        if (result.error) throw result.error
+        if (!result.data && lid) {
+          result = await lineupQuery()
+            .eq('status', 'published')
+            .order('service_date', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (result.error) throw result.error
+        }
+
+        if (result.data) {
+          const data = result.data
           setLineup({
             id: data.id,
             title: data.service_title || 'Unnamed Lineup',
             songs: data.lineup_items || [],
             status: data.status
           })
-          // Store the current lineup ID
-          localStorage.setItem('current_lineup_id', lid)
+          localStorage.setItem('current_lineup_id', data.id)
+        } else {
+          setLineup(null)
         }
       } catch (err) {
         console.error('Error loading lineup:', err)
+        setLineup(null)
       } finally {
         setLoading(false)
       }
     }
 
     loadLineup()
-  }, [user?.id, lineupId])
+  }, [user?.id, teamId, lineupId])
 
-  if (loading || !lineup) {
+  if (loading) {
     return <div>Loading lineup...</div>
+  }
+
+  if (!lineup) {
+    return (
+      <div className="page-container">
+        <h2>Weekly Lineup</h2>
+        <p>No published lineup found for this team yet.</p>
+      </div>
+    )
   }
 
   return (

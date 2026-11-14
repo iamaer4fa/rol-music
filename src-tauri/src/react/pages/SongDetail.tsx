@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import '../App.css'
 
 export default function SongDetail() {
-  const { user } = useAuth()
+  const { user, teamId } = useAuth()
   const { id } = useParams<{ id: string }>()
   const [song, setSong] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!user?.id || !id) return
+    if (!user?.id || !teamId || !id) return
 
     async function loadSong() {
       setLoading(true)
@@ -20,7 +20,7 @@ export default function SongDetail() {
           .from('songs')
           .select('*, tags:song_tags (id, tag_name), arrangements:song_arrangements (*)')
           .eq('id', id)
-          .eq('team_id', localStorage.getItem('team_id'))
+          .eq('team_id', teamId)
           .single()
 
         if (!error && data) {
@@ -34,7 +34,7 @@ export default function SongDetail() {
     }
 
     loadSong()
-  }, [user?.id, id])
+  }, [user?.id, teamId, id])
 
   if (loading || !song) {
     return <div>Loading song...</div>
@@ -93,6 +93,9 @@ export default function SongDetail() {
       )}
 
       <div style={{ marginTop: '1.5rem' }}>
+        <Link to={`/practice/${song.id}`} className="btn-primary">
+          Practice this song
+        </Link>
         <button onClick={() => window.history.back()} className="btn-primary">
           Back to Catalog
         </button>

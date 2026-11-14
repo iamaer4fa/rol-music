@@ -4,27 +4,21 @@ import { useAuth } from '../hooks/use-auth'
 import '../App.css'
 
 export default function Announcements() {
-  const { user } = useAuth()
+  const { user, teamId } = useAuth()
   const [announcements, setAnnouncements] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [teamId, setTeamId] = useState('')
 
   useEffect(() => {
     if (!user?.id) return
-
-    const init = async () => {
-      const tid = localStorage.getItem('team_id')
-      if (tid) {
-        setTeamId(tid)
-        await loadAnnouncements()
-      }
+    if (!teamId) {
       setLoading(false)
+      return
     }
 
-    init()
-  }, [user?.id])
+    loadAnnouncements(teamId)
+  }, [user?.id, teamId])
 
-  async function loadAnnouncements() {
+  async function loadAnnouncements(teamId: string) {
     setLoading(true)
     try {
       const { data, error } = await supa

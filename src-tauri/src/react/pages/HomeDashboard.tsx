@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/use-auth'
 import '../App.css'
 
 export default function HomeDashboard() {
-  const { user, session } = useAuth()
+  const { user, teamId } = useAuth()
   const [upcomingService, setUpcomingService] = useState<{ serviceDate: string; serviceTitle: string; songs: any[] } | null>(null)
   const [recentSongs, setRecentSongs] = useState<any[]>([])
   const [recentAnnouncements, setRecentAnnouncements] = useState<any[]>([])
@@ -14,19 +14,18 @@ export default function HomeDashboard() {
 
   useEffect(() => {
     if (!user?.id) return
+    const activeTeamId = teamId
+    if (!activeTeamId) {
+      setLoading(false)
+      return
+    }
+
     const userId = user.id
 
-    async function loadDashboardData() {
+    async function loadDashboardData(activeTeamId: string) {
       setLoading(true)
 
       try {
-        // Get team ID from localStorage (set during auth)
-        const teamId = localStorage.getItem('team_id')
-        if (!teamId) {
-          setLoading(false)
-          return
-        }
-
         // Calculate upcoming service date
         // Default: Sunday service, 09:00 cutoff
         // - Sunday before 09:00: current Sunday is upcoming
@@ -76,7 +75,7 @@ export default function HomeDashboard() {
         const { data: songs, error: songsError } = await supa
           .from('songs')
           .select('*')
-          .eq('team_id', teamId)
+          .eq('team_id', activeTeamId)
           .eq('is_active', true)
           .order('created_at', { ascending: false })
           .limit(5)
@@ -89,7 +88,7 @@ export default function HomeDashboard() {
         const { data: posts, error: postsError } = await supa
           .from('team_posts')
           .select('*, author:profiles!team_posts_author_id_fkey (display_name)')
-          .eq('team_id', teamId)
+          .eq('team_id', activeTeamId)
           .order('created_at', { ascending: false })
           .limit(5)
 
@@ -111,7 +110,7 @@ export default function HomeDashboard() {
 
         // Check sync status
         // We'll check if there are pending local records
-        checkSyncStatus(teamId)
+        checkSyncStatus(activeTeamId)
 
       } catch (err) {
         console.error('Error loading dashboard:', err)
@@ -121,8 +120,8 @@ export default function HomeDashboard() {
       }
     }
 
-    loadDashboardData()
-  }, [user?.id])
+    loadDashboardData(activeTeamId)
+  }, [user?.id, teamId])
 
   function checkSyncStatus(teamId: string) {
     // In a full implementation, we'd check local SQLite for pending records

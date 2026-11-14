@@ -1,86 +1,75 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
+import { useNavigate } from 'react-router-dom'
 import '../App.css'
 
 export default function SongCatalog() {
-  const { user } = useAuth()
+  const { user, teamId } = useAuth()
+  const navigate = useNavigate()
   const [songs, setSongs] = useState<any[]>([])
-  const [filteredSongs, setFilteredSongs] = useState<any[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [teamId, setTeamId] = useState<string>('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!user?.id) return
-
-    const init = async () => {
-      const tid = localStorage.getItem('team_id')
-      if (tid) {
-        setTeamId(tid)
-        await loadSongs()
-      }
+    if (!user?.id) {
       setLoading(false)
+      return
     }
 
-    init()
-  }, [user?.id])
-
-  async function loadSongs() {
-    setLoading(true)
-    try {
-      let query = supa.from('songs').select('*, tags:song_tags!inner (id, tag_name)').eq('team_id', teamId).eq('is_active', true)
-
-      if (searchQuery) {
-        query = query.or(`title.ilike.%${searchQuery}%,artist.ilike.%${searchQuery}%`)
-      }
-      if (selectedTag) {
-        query = query.eq('tags.tag_name', selectedTag)
-      }
-      if (selectedKey) {
-        query = query.eq('key_signature', selectedKey)
-      }
-
-      const { data, error } = await query.order('title', { ascending: true })
-
-      if (!error && data) {
-        setSongs(data)
-        setFilteredSongs(data)
-      }
-    } catch (err) {
-      console.error('Error loading songs:', err)
-    } finally {
+    if (!teamId) {
       setLoading(false)
+      return
     }
-  }
 
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value
-    setSearchQuery(query)
-    if (query.trim()) {
-      // Filter songs by search query
-      const filtered = songs.filter(
-        (s) =>
-          (s.title && s.title.toLowerCase().includes(query.toLowerCase())) ||
-          (s.artist && s.artist.toLowerCase().includes(query.toLowerCase()))
-      )
-      setFilteredSongs(filtered)
-    } else {
-      setFilteredSongs(songs)
+    let cancelled = false
+    async function loadSongs() {
+      setLoading(true)
+      setLoadError(null)
+      try {
+        let query = supa
+          .from('songs')
+          .select('*, tags:song_tags!inner (id, tag_name)')
+          .eq('team_id', teamId)
+          .eq('is_active', true)
+
+        if (selectedTag) {
+          query = query.eq('tags.tag_name', selectedTag)
+        }
+        if (selectedKey) {
+          query = query.eq('key_signature', selectedKey)
+        }
+
+        const { data, error } = await query.order('title', { ascending: true })
+        if (error) throw error
+        if (!cancelled) setSongs(data ?? [])
+      } catch (err) {
+        console.error('Error loading songs:', err)
+        if (!cancelled) {
+          setSongs([])
+          setLoadError('Unable to load songs. Check your team membership and database setup.')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
-  }
 
-  const handleTagFilter = (tag: string | null) => {
-    setSelectedTag(tag)
-    loadSongs()
-  }
+    void loadSongs()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, teamId, selectedTag, selectedKey])
 
-  const handleKeyFilter = (key: string | null) => {
-    setSelectedKey(key)
-    loadSongs()
-  }
+  const filteredSongs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return songs
+    return songs.filter((song) =>
+      [song.title, song.artist].some((value) => value?.toLowerCase().includes(query))
+    )
+  }, [searchQuery, songs])
 
   return (
     <div className="page-container">
@@ -94,11 +83,14 @@ export default function SongCatalog() {
               type="text"
               placeholder="Search songs..."
               value={searchQuery}
-              onChange={handleSearch}
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
           <div>
-            <select onChange={(e) => handleTagFilter(e.target.value)}>
+            <select
+              value={selectedTag ?? ''}
+              onChange={(e) => setSelectedTag(e.target.value || null)}
+            >
               <option value="">All Tags</option>
               <option>Worship</option>
               <option>Praise</option>
@@ -111,7 +103,10 @@ export default function SongCatalog() {
             </select>
           </div>
           <div>
-            <select onChange={(e) => handleKeyFilter(e.target.value)}>
+            <select
+              value={selectedKey ?? ''}
+              onChange={(e) => setSelectedKey(e.target.value || null)}
+            >
               <option value="">All Keys</option>
               <option>C</option>
               <option>G</option>
@@ -125,6 +120,8 @@ export default function SongCatalog() {
 
       {loading ? (
         <p>Loading songs...</p>
+      ) : loadError ? (
+        <p role="alert">{loadError}</p>
       ) : filteredSongs.length === 0 ? (
         <p>No songs found. Ask a Worship Leader to add songs to the catalog.</p>
       ) : (
@@ -135,10 +132,10 @@ export default function SongCatalog() {
               {song.key_signature ? ` (${song.key_signature})` : ''}
               <button
                 style={{ marginLeft: '1rem', padding: '0.25rem 0.5rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}
-                onClick={() => window.alert(`View details for "${song.title}"`)}
-            >
-              View
-            </button>
+                onClick={() => navigate(`/song/${song.id}`)}
+              >
+                View
+              </button>
             </li>
           ))}
         </ul>

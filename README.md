@@ -29,6 +29,10 @@ See the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/) for 
 3. For a new database, apply [`src-tauri/src/db/20241111_initial_schema.sql`](src-tauri/src/db/20241111_initial_schema.sql) once using the Supabase SQL Editor or your migration workflow. This creates the tables and RLS policies; the application does not run this migration automatically.
 4. Create an Auth user, then bootstrap that user with a profile, team, active `team_members` row, and `team_settings` row using a privileged setup path such as the SQL Editor. Assign an application access role (`worship_leader`, `worship_team_director`, or `member`); musical roles are separate. Do not rerun the initial migration on an initialized database.
 
+### Load demo content
+
+To populate a configured team for testing, run [`src-tauri/src/db/demo_seed.sql`](src-tauri/src/db/demo_seed.sql) in the Supabase SQL Editor after the initial schema and team bootstrap are in place. It adds five original demo songs, tags, arrangements, a published lineup, an announcement, and a sample song comment. The seed can be rerun safely; it does not create fake practice sessions or enable practice sharing.
+
 ## Install, run, and build
 
 From the repository root:
@@ -53,6 +57,6 @@ Tauri bundles are written under `src-tauri/target/release/bundle/`. Build on the
 
 - `src-tauri/src/react/` — React application, pages, hooks, and Supabase client
 - `src-tauri/src/` — Rust/Tauri application code
-- `src-tauri/src/db/` — database schema and migrations
+- `src-tauri/src/db/` — database schema, migrations, and optional demo seed
 - `src-tauri/tauri.conf.json` — Tauri desktop and build configuration
 - `docs/spec.md` — product and architecture specification
