@@ -60,15 +60,15 @@ npx tauri build
 ```
 
 Tauri bundles are written under `src-tauri/target/release/bundle/`. Build on the target operating system and install the platform prerequisites above.
-Linux artifact basenames use the lowercase `rol_worship_team` product name; the application window continues to display “ROL Worship Team”.
+Linux package metadata and the desktop menu display “ROL Music Team”; the main executable remains `rol_music_team`.
 
 To uninstall the Debian package, use its package ID (not the display name or `.deb` filename):
 
 ```sh
-sudo apt remove rol-worship-team
+sudo apt remove rol-music-team
 ```
 
-Use `sudo apt purge rol-worship-team` to also remove package-managed configuration files. This does not remove per-user application data.
+Use `sudo apt purge rol-music-team` to also remove package-managed configuration files. This does not remove per-user application data.
 
 ## Practice and lineup behavior
 
