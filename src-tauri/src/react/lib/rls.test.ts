@@ -54,4 +54,29 @@ describe('database migration security', () => {
     expect(bootstrapIndex).toBeGreaterThan(-1)
     expect(triggerIndex).toBeGreaterThan(bootstrapIndex)
   })
+
+  it('enforces one published lineup per team and service date while allowing replacement drafts', () => {
+    const migration = readFileSync(
+      'src-tauri/src/db/20261125_published_lineup_conflict.sql',
+      'utf8',
+    )
+    const page = readFileSync(
+      'src-tauri/src/react/pages/WeeklyLineup.tsx',
+      'utf8',
+    )
+    expect(migration).toContain('CREATE UNIQUE INDEX IF NOT EXISTS lineups_one_published_per_team_date_idx')
+    expect(migration).toContain("WHERE status = 'published'")
+    expect(migration).toContain('replaces_lineup_id')
+    expect(migration).toContain('pg_advisory_xact_lock')
+    expect(migration).toContain('SECURITY DEFINER')
+    expect(migration).toContain("public.has_team_role(candidate.team_id, ARRAY['worship_leader']::text[])")
+    expect(migration).toContain('CREATE OR REPLACE FUNCTION public.delete_lineup(p_lineup_id uuid)')
+    expect(migration).toContain("target.status NOT IN ('draft', 'published')")
+    expect(migration).toContain('A published lineup already exists for this service date')
+    expect(migration).toContain('This replacement draft is stale')
+    expect(page).toContain('replaces_lineup_id: lineup.id')
+    expect(page).toContain("supa.rpc('publish_lineup'")
+    expect(page).toContain("supa.rpc('delete_lineup'")
+    expect(page).toContain('This cannot be undone.')
+  })
 })

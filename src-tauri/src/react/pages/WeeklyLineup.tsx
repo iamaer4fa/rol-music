@@ -399,6 +399,7 @@ export default function WeeklyLineup() {
           service_date: lineup.service_date,
           service_title: `${lineup.title} (Revision)`,
           status: 'draft',
+          replaces_lineup_id: lineup.id,
           version: lineup.version + 1,
           created_by: user.id,
         })
@@ -661,41 +662,74 @@ export default function WeeklyLineup() {
     await reorderItems(items)
   }
 
+  async function deleteLineup() {
+    if (!lineup || !teamId || !isLeader || !['draft', 'published'].includes(lineup.status)) return
+    const confirmation = lineup.status === 'published'
+      ? `Permanently delete the published lineup for ${lineup.service_date}? Its songs, assignments, and change history will also be deleted. This cannot be undone.`
+      : `Permanently delete this draft for ${lineup.service_date}? Its songs, assignments, and change history will also be deleted. This cannot be undone.`
+    if (!window.confirm(confirmation)) return
+
+    setSaving(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const { error: deleteError } = await supa.rpc('delete_lineup', {
+        p_lineup_id: lineup.id,
+      })
+      if (deleteError) throw deleteError
+
+      const remainingLineups = lineups.filter((item) => item.id !== lineup.id)
+      const nextLineup =
+        remainingLineups.find((item) =>
+          item.service_date === lineup.service_date && item.status === 'published'
+        ) ??
+        remainingLineups.find((item) => item.status === 'published') ??
+        (isLeader ? remainingLineups.find((item) => item.status === 'draft') : undefined)
+      setLineups(remainingLineups)
+      setSelectedId(nextLineup?.id ?? null)
+      setLineup(null)
+      setLineupHistory([])
+      setLineupAssignments([])
+
+      let refreshWarning: string | null = null
+      try {
+        await saveApplicationCache(teamId, 'lineups', remainingLineups)
+      } catch (cacheError) {
+        console.error('Unable to update the cached lineup list after deletion:', cacheError)
+        refreshWarning = 'the saved lineup list could not be updated'
+      }
+
+      if (nextLineup) {
+        try {
+          await loadLineup(nextLineup.id)
+        } catch (loadError) {
+          console.error('Unable to load another lineup after deletion:', loadError)
+          refreshWarning = 'the next lineup could not be loaded'
+        }
+      }
+
+      showNotice(
+        refreshWarning ? `Lineup deleted, but ${refreshWarning}.` : 'Lineup deleted.',
+        refreshWarning ? 'warning' : 'success',
+      )
+    } catch (deleteError) {
+      console.error('Error deleting lineup:', deleteError)
+      setError('Unable to delete the lineup.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function publishLineup() {
     if (!lineup || !teamId || !user?.id || !isLeader || lineup.status !== 'draft') return
     if (!window.confirm('Publish this lineup? Published lineups become read-only. Make a replacement draft to correct it later.')) return
     setSaving(true)
     setError(null)
     try {
-      const { data: published, error: publishError } = await supa
-        .from('lineups')
-        .update({
-          status: 'published',
-          published_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', lineup.id)
-        .eq('team_id', teamId)
-        .eq('status', 'draft')
-        .select('id')
-        .maybeSingle()
-      if (publishError) throw publishError
-      if (!published) throw new Error('The draft was not published.')
-      await supa.from('lineup_change_history').insert({
-        team_id: teamId,
-        lineup_id: lineup.id,
-        changed_by: user.id,
-        action: 'published',
-        details: { service_date: lineup.service_date, version: lineup.version },
+      const { error: publishError } = await supa.rpc('publish_lineup', {
+        p_lineup_id: lineup.id,
       })
-
-      const { error: archiveError } = await supa
-        .from('lineups')
-        .update({ status: 'archived', updated_at: new Date().toISOString() })
-        .eq('team_id', teamId)
-        .eq('service_date', lineup.service_date)
-        .eq('status', 'published')
-        .neq('id', lineup.id)
+      if (publishError) throw publishError
 
       setLineup({ ...lineup, status: 'published' })
       setLineups((current) => current.map((item) =>
@@ -705,15 +739,20 @@ export default function WeeklyLineup() {
             ? { ...item, status: 'archived' }
             : item
       ))
-      if (archiveError) {
-        console.error('Unable to archive the previous published lineup:', archiveError)
-        showNotice('Lineup published, but the prior published lineup could not be archived.', 'warning')
-      } else {
-        showNotice('Lineup published. Published items are read-only; use a replacement draft for corrections.')
-      }
+      showNotice('Lineup published. Published items are read-only; use a replacement draft for corrections.')
     } catch (publishError) {
       console.error('Error publishing lineup:', publishError)
-      setError('Unable to publish the lineup.')
+      const message = typeof publishError === 'object' && publishError !== null
+        && 'message' in publishError && typeof publishError.message === 'string'
+        ? publishError.message
+        : ''
+      if (message.includes('A published lineup already exists for this service date')) {
+        setError('A lineup is already published for this Sunday. Create a replacement draft from the published lineup to replace it.')
+      } else if (message.includes('replacement draft is stale')) {
+        setError('This replacement draft is out of date. Create a new replacement draft from the currently published lineup.')
+      } else {
+        setError(message || 'Unable to publish the lineup.')
+      }
     } finally {
       setSaving(false)
     }
@@ -1073,6 +1112,11 @@ export default function WeeklyLineup() {
           {isLeader && lineup.status === 'published' && (
             <button type="button" className="btn-primary" onClick={() => void createRevision()} disabled={saving}>
               {saving ? 'Creating…' : 'Create Replacement Draft'}
+            </button>
+          )}
+          {isLeader && (lineup.status === 'draft' || lineup.status === 'published') && (
+            <button type="button" className="btn-secondary" onClick={() => void deleteLineup()} disabled={saving}>
+              {saving ? 'Deleting…' : 'Delete Lineup'}
             </button>
           )}
           {lineupHistory.length > 0 && (
