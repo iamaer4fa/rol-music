@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getUpcomingServiceDate, hasDuplicateSong } from './workflow'
+import { getDateInTimeZone, getUpcomingServiceDate, hasDuplicateSong } from './workflow'
 import { classifyMediaUrl, getEmbeddedMediaUrl } from './media'
 import { transposeChord } from './chordpro'
 import { getWeekStartDate, getWeekEndDate, getWeekdayName, escapeCsv } from './reporting'
@@ -8,6 +8,11 @@ describe('worship workflow', () => {
   it('uses the team cutoff to choose the next Sunday', () => {
     const sundayMorning = new Date('2026-11-24T01:00:00Z')
     expect(getUpcomingServiceDate(sundayMorning, 'UTC', 7, '09:00')).toBe('2026-11-29')
+  })
+
+  it('uses the team timezone when determining the service date boundary', () => {
+    expect(getDateInTimeZone(new Date('2026-11-25T18:00:00Z'), 'Asia/Manila')).toBe('2026-11-26')
+    expect(getDateInTimeZone(new Date('2026-11-25T18:00:00Z'), 'UTC')).toBe('2026-11-25')
   })
 
   it('returns the current Sunday before the cutoff', () => {

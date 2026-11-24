@@ -41,6 +41,41 @@ USING (
     AND status IN ('draft', 'published')
 );
 
+CREATE OR REPLACE FUNCTION public.prevent_past_published_lineup_deletion()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    team_timezone text;
+BEGIN
+    IF OLD.status = 'published' THEN
+        SELECT iana_timezone
+        INTO team_timezone
+        FROM public.team_settings
+        WHERE team_id = OLD.team_id;
+
+        IF OLD.service_date < timezone(
+            COALESCE(team_timezone, 'Asia/Manila'),
+            now()
+        )::date THEN
+            RAISE EXCEPTION 'Past published lineups cannot be deleted.';
+        END IF;
+    END IF;
+
+    RETURN OLD;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.prevent_past_published_lineup_deletion()
+    FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS lineups_prevent_past_published_delete ON public.lineups;
+CREATE TRIGGER lineups_prevent_past_published_delete
+BEFORE DELETE ON public.lineups
+FOR EACH ROW EXECUTE FUNCTION public.prevent_past_published_lineup_deletion();
+
 CREATE OR REPLACE FUNCTION public.publish_lineup(p_lineup_id uuid)
 RETURNS void
 LANGUAGE plpgsql

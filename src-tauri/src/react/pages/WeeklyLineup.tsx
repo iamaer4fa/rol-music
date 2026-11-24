@@ -3,7 +3,7 @@ import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
-import { getUpcomingServiceDate } from '../lib/workflow'
+import { getDateInTimeZone, getUpcomingServiceDate } from '../lib/workflow'
 import { canManageTeam } from '../lib/roles'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
@@ -76,6 +76,7 @@ export default function WeeklyLineup() {
   const [transitionNotes, setTransitionNotes] = useState('')
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [serviceDate, setServiceDate] = useState(new Date().toISOString().slice(0, 10))
+  const [teamTimezone, setTeamTimezone] = useState('Asia/Manila')
   const [serviceTitle, setServiceTitle] = useState('Sunday Worship')
   const [showNewLineupForm, setShowNewLineupForm] = useState(false)
   const [lineupSongSearch, setLineupSongSearch] = useState('')
@@ -228,9 +229,11 @@ export default function WeeklyLineup() {
         if (settingsError) throw settingsError
         if (!active) return
 
+        const timezone = teamSettings?.iana_timezone ?? 'Asia/Manila'
+        setTeamTimezone(timezone)
         const nextServiceDate = getUpcomingServiceDate(
           new Date(),
-          teamSettings?.iana_timezone ?? 'Asia/Manila',
+          timezone,
           teamSettings?.service_day_of_week ?? 7,
           teamSettings?.service_cutoff_time ?? '09:00:00',
         )
@@ -297,6 +300,8 @@ export default function WeeklyLineup() {
   }, [user?.id, teamId, requestedLineupId, isLeader, loadLineup])
 
   const selectedSong = catalogSongs.find((song) => song.id === selectedSongId)
+  const isPastPublishedLineup = lineup?.status === 'published'
+    && lineup.service_date < getDateInTimeZone(new Date(), teamTimezone)
   const availableLineupSongs = catalogSongs.filter((song) =>
     !lineup?.songs.some((item) => item.song_id === song.id)
   )
@@ -664,6 +669,10 @@ export default function WeeklyLineup() {
 
   async function deleteLineup() {
     if (!lineup || !teamId || !isLeader || !['draft', 'published'].includes(lineup.status)) return
+    if (lineup.status === 'published' && isPastPublishedLineup) {
+      setError('Past published lineups cannot be deleted.')
+      return
+    }
     const confirmation = lineup.status === 'published'
       ? `Permanently delete the published lineup for ${lineup.service_date}? Its songs, assignments, and change history will also be deleted. This cannot be undone.`
       : `Permanently delete this draft for ${lineup.service_date}? Its songs, assignments, and change history will also be deleted. This cannot be undone.`
@@ -714,7 +723,13 @@ export default function WeeklyLineup() {
       )
     } catch (deleteError) {
       console.error('Error deleting lineup:', deleteError)
-      setError('Unable to delete the lineup.')
+      const message = typeof deleteError === 'object' && deleteError !== null
+        && 'message' in deleteError && typeof deleteError.message === 'string'
+        ? deleteError.message
+        : ''
+      setError(message.includes('Past published lineups cannot be deleted')
+        ? 'Past published lineups cannot be deleted.'
+        : message || 'Unable to delete the lineup.')
     } finally {
       setSaving(false)
     }
@@ -1114,7 +1129,10 @@ export default function WeeklyLineup() {
               {saving ? 'Creating…' : 'Create Replacement Draft'}
             </button>
           )}
-          {isLeader && (lineup.status === 'draft' || lineup.status === 'published') && (
+          {isLeader && lineup.status === 'published' && isPastPublishedLineup && (
+            <p role="status">Past published lineups cannot be deleted.</p>
+          )}
+          {isLeader && (lineup.status === 'draft' || (lineup.status === 'published' && !isPastPublishedLineup)) && (
             <button type="button" className="btn-secondary" onClick={() => void deleteLineup()} disabled={saving}>
               {saving ? 'Deleting…' : 'Delete Lineup'}
             </button>
