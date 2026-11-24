@@ -214,9 +214,13 @@ export function useAuth(): UserContextType {
     }
     if (navigator.onLine) onOnline()
     window.addEventListener('online', onOnline)
+    const retryTimer = window.setInterval(() => {
+      if (navigator.onLine) onOnline()
+    }, 60_000)
     return () => {
       active = false
       window.removeEventListener('online', onOnline)
+      window.clearInterval(retryTimer)
     }
   }, [user?.id, teamId, practiceSharingEnabled])
 

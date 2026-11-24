@@ -4,6 +4,11 @@ import { Link, useParams } from 'react-router-dom'
 import { supa, type PracticeSession } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import { getEmbeddedMediaUrl, parseMediaKind } from '../lib/media'
+import ChordProViewer from '../components/ChordProViewer'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
+import { downloadForOffline, readOfflineMedia, removeOfflineMedia } from '../lib/offline'
 import '../App.css'
 
 type Song = {
@@ -71,12 +76,14 @@ export default function PracticeView() {
   const [syncStatus, setSyncStatus] = useState<'idle' | 'private' | 'pending' | 'synced' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [offlineMediaUrl, setOfflineMediaUrl] = useState<string | null>(null)
+  const [offlineMediaReady, setOfflineMediaReady] = useState(false)
   const selectedMedia = song?.media.find((media) => media.id === selectedMediaId) ?? null
   const mediaKind = selectedMedia ? parseMediaKind(selectedMedia.media_type) : null
   const selectedAudioUrl = selectedMedia?.external_url && mediaKind === 'audio'
     ? selectedMedia.external_url
     : null
-  const source = audioSource ?? (
+  const source = audioSource ?? offlineMediaUrl ?? (
     selectedMedia?.local_file_reference ? mediaPlaybackUrl : selectedAudioUrl
   )
 
@@ -219,6 +226,19 @@ export default function PracticeView() {
       active = false
     }
   }, [selectedMedia?.id, selectedMedia?.local_file_reference])
+
+  useEffect(() => {
+    if (!selectedMedia || !teamId) {
+      setOfflineMediaUrl(null)
+      setOfflineMediaReady(false)
+      return
+    }
+    const cacheKey = `offline-media:${teamId}:${selectedMedia.id}`
+    void readOfflineMedia(cacheKey).then((url) => {
+      setOfflineMediaUrl(url)
+      setOfflineMediaReady(Boolean(url))
+    })
+  }, [selectedMedia?.id, teamId])
 
   const saveFinishedSegment = useCallback(async (sessionId: string) => {
     const session = await invoke<PracticeSession | null>('finish_practice_segment', {
@@ -484,6 +504,33 @@ export default function PracticeView() {
     setSyncStatus('idle')
   }
 
+  async function cacheCurrentMedia() {
+    if (!selectedMedia || !teamId) return
+    const downloadUrl = selectedMedia.external_url ?? mediaPlaybackUrl
+    if (!downloadUrl) {
+      setError('The shared audio must finish loading before it can be downloaded.')
+      return
+    }
+    const cacheKey = `offline-media:${teamId}:${selectedMedia.id}`
+    try {
+      await downloadForOffline(downloadUrl, cacheKey)
+      const url = await readOfflineMedia(cacheKey)
+      setOfflineMediaUrl(url)
+      setOfflineMediaReady(Boolean(url))
+    } catch (cacheError) {
+      console.error('Unable to cache shared audio:', cacheError)
+      setError(cacheError instanceof Error ? cacheError.message : 'Unable to download shared audio.')
+    }
+  }
+
+  async function removeCurrentOfflineMedia() {
+    if (!selectedMedia || !teamId) return
+    const cacheKey = `offline-media:${teamId}:${selectedMedia.id}`
+    await removeOfflineMedia(cacheKey)
+    setOfflineMediaUrl(null)
+    setOfflineMediaReady(false)
+  }
+
   async function togglePracticeSharing(enabled: boolean) {
     if (enabled) {
       const accepted = window.confirm(
@@ -518,9 +565,9 @@ export default function PracticeView() {
     return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
   }
 
-  if (loading) return <div className="page-container">Loading practice view...</div>
-  if (error && !song) return <div className="page-container" role="alert">{error}</div>
-  if (!song) return <div className="page-container">Song not found.</div>
+  if (loading) return <div className="page-container"><h2>Practice</h2><LoadingSkeleton rows={4} label="Loading practice board" /></div>
+  if (error && !song) return <div className="page-container"><StatusMessage tone="error">{error}</StatusMessage></div>
+  if (!song) return <div className="page-container"><EmptyState title="Song not found">Return to the song catalog and select an available song.</EmptyState></div>
 
   const embeddedUrl = selectedMedia?.external_url && mediaKind
     ? getEmbeddedMediaUrl(mediaKind, selectedMedia.external_url)
@@ -532,7 +579,7 @@ export default function PracticeView() {
   return (
     <div className="page-container">
       <h2>Practice: {song.title}</h2>
-      {error && <p className="error-message" role="alert">{error}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
 
       <section className="card">
         <h3>Song Info</h3>
@@ -580,6 +627,22 @@ export default function PracticeView() {
             })}
           />
         </label>
+        {selectedMedia && (selectedMedia.external_url || mediaPlaybackUrl) && (
+          <div className="offline-media-actions">
+            {offlineMediaReady ? (
+              <>
+                <span role="status">Downloaded for offline practice</span>
+                <button type="button" className="btn-secondary" onClick={() => void removeCurrentOfflineMedia()}>
+                  Remove offline copy
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn-secondary" onClick={() => void cacheCurrentMedia()}>
+                Download for offline
+              </button>
+            )}
+          </div>
+        )}
         {audioSourceName && <p>Selected: {audioSourceName}</p>}
         {mediaLoading && <p>Preparing shared audio…</p>}
         {source && (
@@ -640,7 +703,7 @@ export default function PracticeView() {
           <p>Select a local audio file to start measured playback practice.</p>
         )}
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
+        <div className="practice-controls">
           {song.arrangements.length > 0 && (
             <label>
               Arrangement
@@ -689,7 +752,11 @@ export default function PracticeView() {
         {isPlaying && <button type="button" onClick={() => void stopAndSave()} disabled={saving}>
           {saving ? 'Saving…' : 'End and save practice'}
         </button>}
-        {syncStatus !== 'idle' && <p role="status">{statusMessage}</p>}
+        {syncStatus !== 'idle' && statusMessage && (
+          <StatusMessage tone={syncStatus === 'error' ? 'error' : syncStatus === 'synced' ? 'success' : 'warning'}>
+            {statusMessage}
+          </StatusMessage>
+        )}
       </section>
 
       <section className="card">
@@ -709,13 +776,10 @@ export default function PracticeView() {
         </p>
       </section>
 
-      <section className="card">
-        <h3>Lyrics and Chords</h3>
-        <p>Arrangement key metadata is shown above. Chord text does not transpose automatically yet.</p>
-        <pre style={{ whiteSpace: 'pre-wrap', overflow: 'auto', maxHeight: '24rem' }}>
-          {song.chordpro_lyrics || 'No lyrics available'}
-        </pre>
-      </section>
+      <ChordProViewer
+        source={song.chordpro_lyrics}
+        defaultKey={selectedArrangement?.key ?? song.key_signature}
+      />
     </div>
   )
 }

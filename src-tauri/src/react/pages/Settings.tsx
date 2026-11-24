@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
 import '../App.css'
 
 const weekdays = [
@@ -178,65 +180,71 @@ export default function Settings() {
   }
 
   if (loading) {
-    return <div className="page-container">Loading settings...</div>
+    return <div className="page-container"><h2>Settings</h2><LoadingSkeleton rows={4} label="Loading settings" /></div>
   }
 
   return (
     <div className="page-container">
       <h2>Settings</h2>
-      {error && <p className="error-message" role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
+      {notice && <StatusMessage tone="success">{notice}</StatusMessage>}
 
-      <form onSubmit={saveSettings}>
+      <form className="settings-form" onSubmit={saveSettings}>
         <section className="card">
           <h3>Profile</h3>
-          <label>
-            Display name
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              maxLength={255}
-              autoComplete="name"
-            />
-          </label>
-          <label>
-            Preferred instrument
-            <input
-              value={preferredInstrument}
-              onChange={(event) => setPreferredInstrument(event.target.value)}
-              maxLength={255}
-              placeholder="For example, keyboard"
-            />
-          </label>
-          <p>Musical roles: {musicalRoles.length ? musicalRoles.join(', ') : 'Not assigned'}</p>
+          <div className="settings-fields">
+            <label>
+              Display name
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                maxLength={255}
+                autoComplete="name"
+              />
+            </label>
+            <label>
+              Preferred instrument
+              <input
+                value={preferredInstrument}
+                onChange={(event) => setPreferredInstrument(event.target.value)}
+                maxLength={255}
+                placeholder="For example, keyboard"
+              />
+            </label>
+          </div>
+          <p className="settings-musical-roles">
+            Musical roles: {musicalRoles.length ? musicalRoles.join(', ') : 'Not assigned'}
+          </p>
         </section>
 
         <section className="card">
           <h3>Practice Privacy</h3>
-          <label>
+          <label className="settings-checkbox-row">
             <input
               type="checkbox"
               checked={practiceSharingEnabled}
               onChange={(event) => void changePracticeSharing(event.target.checked)}
             />
-            Share my practice activity with team leadership
+            <span>Share my practice activity with team leadership</span>
           </label>
-          <p>
-            Sharing is optional. When enabled, Worship Leaders and Worship Team Directors can
-            view shared sessions for team and song summaries. Reports are not proof of
-            attention, attendance, or performance.
-          </p>
-          <p>
-            Turning sharing off stops new uploads and hides your previously shared sessions
-            from leadership through RLS; it does not delete append-only server records.
-            Private local history is never uploaded automatically.
-          </p>
+          <div className="settings-privacy-copy">
+            <p>
+              Sharing is optional. When enabled, Worship Leaders and Worship Team Directors can
+              view shared sessions for team and song summaries. Reports are not proof of
+              attention, attendance, or performance.
+            </p>
+            <p>
+              Turning sharing off stops new uploads and hides your previously shared sessions
+              from leadership through RLS; it does not delete append-only server records.
+              Private local history is never uploaded automatically.
+            </p>
+          </div>
         </section>
 
         <section className="card">
           <h3>Team Calendar</h3>
           {isLeader ? (
-            <>
+            <div className="settings-fields settings-calendar-fields">
               <label>
                 IANA timezone
                 <input
@@ -276,21 +284,21 @@ export default function Settings() {
                   required
                 />
               </label>
-            </>
+            </div>
           ) : (
-            <>
+            <div className="settings-summary-grid">
               <p>Timezone: {ianaTimezone}</p>
               <p>Week starts on: {weekdays[weekStartsOn - 1]}</p>
               <p>Service day: {weekdays[serviceDayOfWeek - 1]}</p>
               <p>Service cutoff: {serviceCutoffTime}</p>
-            </>
+            </div>
           )}
         </section>
 
-        <div style={{ marginTop: '1.5rem' }}>
-        <button type="submit" className="btn-primary" disabled={saving}>
-          {saving ? 'Saving…' : 'Save Changes'}
-        </button>
+        <div className="settings-actions">
+          <button type="submit" className="btn-primary" disabled={saving}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
         </div>
       </form>
 

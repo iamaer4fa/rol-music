@@ -93,6 +93,32 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgb(64 88 200 / 13%);
 }
 
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 20;
+  top: 0.5rem;
+  left: 0.5rem;
+  transform: translateY(-160%);
+  padding: 0.65rem 0.9rem;
+  border-radius: 8px;
+  background: var(--card-background);
+  color: var(--text-color);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 a {
   color: var(--primary-color);
 }
@@ -300,6 +326,337 @@ h3 {
   margin-bottom: 0;
 }
 
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.settings-fields {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.settings-musical-roles {
+  margin-top: 0.8rem;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.settings-checkbox-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+  width: fit-content;
+  color: var(--text-color) !important;
+  font-size: 0.875rem !important;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.settings-checkbox-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 18px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
+}
+
+.settings-privacy-copy {
+  margin-top: 0.75rem;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.settings-privacy-copy p {
+  margin-bottom: 0.35rem;
+}
+
+.settings-calendar-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 1rem;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.settings-summary-grid p {
+  margin-bottom: 0.35rem;
+}
+
+.settings-actions {
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 700px) {
+  .settings-calendar-fields,
+  .settings-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-service-heading,
+.dashboard-actions,
+.chordpro-toolbar,
+.chordpro-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.dashboard-service-heading {
+  justify-content: space-between;
+  margin-bottom: 0.8rem;
+}
+
+.dashboard-service-heading h3,
+.dashboard-service-heading p,
+.dashboard-card-featured h4 {
+  margin-bottom: 0.35rem;
+}
+
+.dashboard-service-date {
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.dashboard-actions a {
+  text-decoration: none;
+}
+
+.dashboard-service-songs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 1.25rem;
+  margin: 0.8rem 0 0;
+  padding-left: 1.35rem;
+}
+
+.dashboard-service-songs li {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.25rem 0;
+}
+
+.dashboard-service-songs a {
+  color: var(--text-color);
+  text-decoration: none;
+}
+
+.dashboard-service-songs span {
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.dashboard-service-assignments {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.dashboard-service-assignments ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 1rem;
+  margin: 0.5rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.dashboard-service-assignments li span {
+  text-transform: capitalize;
+}
+
+.chordpro-card {
+  overflow: hidden;
+}
+
+.chordpro-toolbar {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.chordpro-toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chordpro-toolbar label select {
+  min-width: 140px;
+}
+
+.chordpro-toolbar label input[type="range"] {
+  width: 120px;
+  min-height: 24px;
+  padding: 0;
+}
+
+.chordpro-toolbar-group > span {
+  color: var(--muted-text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.chordpro-toolbar-group .btn-secondary {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0.35rem;
+  text-align: center;
+  text-decoration: none;
+}
+
+.chordpro-source {
+  margin-top: 0.8rem;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.chordpro-source pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.chordpro-sheet {
+  display: grid;
+  grid-template-columns: repeat(var(--chordpro-columns), minmax(0, 1fr));
+  gap: 0 2rem;
+  margin-top: 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: var(--chordpro-font-size);
+  line-height: 1.9;
+}
+
+.chordpro-line {
+  display: flex;
+  min-height: 2.7em;
+  align-items: flex-end;
+  white-space: pre-wrap;
+}
+
+.chordpro-chord {
+  align-self: flex-start;
+  min-width: 2.5ch;
+  color: var(--primary-color);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.chordpro-lyric {
+  white-space: pre-wrap;
+}
+
+.chordpro-directive {
+  grid-column: 1 / -1;
+  margin-top: 0.5rem;
+  color: var(--muted-text);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lineup-batch-picker {
+  margin-top: 1rem;
+}
+
+.lineup-song-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 220px;
+  gap: 0.35rem 1rem;
+  overflow: auto;
+  margin: 0.75rem 0;
+}
+
+.lineup-song-option {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  padding: 0.45rem;
+  border-radius: 8px;
+  color: var(--text-color) !important;
+  cursor: pointer;
+}
+
+.lineup-song-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 16px;
+  accent-color: var(--primary-color);
+}
+
+.lineup-assignment-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.lineup-assignment-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lineup-assignment-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.lineup-assignment-list li:last-child {
+  border-bottom: 0;
+}
+
+.lineup-assignment-list li > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.lineup-assignment-list li span {
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.lineup-assignment-list select {
+  width: 150px;
+}
+
+.lineup-history ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
 .dashboard-grid {
   display: grid;
   gap: 1rem;
@@ -342,6 +699,286 @@ h3 {
   border-radius: 10px;
   background: var(--danger-surface);
   color: var(--danger-color);
+}
+
+.status-message {
+  margin: 0.65rem 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+
+.status-message-success {
+  border-color: #b7dfc2;
+  background: #effaf2;
+  color: #236239;
+}
+
+.status-message-warning {
+  border-color: #e8d39b;
+  background: #fff8e6;
+  color: #725515;
+}
+
+.status-message-error {
+  border-color: #f4c7c7;
+  background: var(--danger-surface);
+  color: var(--danger-color);
+}
+
+.empty-state {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.5rem 0 1rem;
+  padding: 1.15rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+  color: var(--text-color);
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--muted-text);
+}
+
+.loading-skeleton {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+}
+
+.loading-skeleton-row {
+  display: block;
+  width: 100%;
+  height: 3.25rem;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--surface-subtle) 25%, var(--border-color) 45%, var(--surface-subtle) 65%);
+  background-size: 300% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  to { background-position: -150% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-skeleton-row {
+    animation: none;
+  }
+}
+
+.catalog-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.catalog-filter-grid > label:first-child {
+  grid-column: 1 / -1;
+}
+
+.filter-result-count {
+  margin: 0.75rem 0 0;
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.catalog-filter-grid label,
+.announcement-search label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.catalog-sort-direction {
+  grid-column: auto;
+}
+
+.page-container .song-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.page-container .song-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.75rem 1rem;
+  min-height: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--card-background);
+  box-shadow: var(--shadow-card);
+}
+
+.song-list-summary {
+  display: grid;
+  align-content: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.song-list-summary span,
+.song-arrangement-preview li span,
+.song-arrangement-preview li p {
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.song-arrangement-preview {
+  grid-column: 1 / -1;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.song-arrangement-preview summary {
+  width: fit-content;
+  color: var(--primary-color);
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.song-arrangement-preview ul {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.song-arrangement-preview li p {
+  margin: 0.15rem 0 0;
+}
+
+.announcement-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.announcement-card {
+  margin: 0;
+}
+
+.announcement-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.announcement-heading time {
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.announcement-card p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.announcement-search {
+  margin-bottom: 1rem;
+}
+
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 12px;
+}
+
+.table-scroll:focus-visible {
+  outline: 3px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.lineup-table {
+  min-width: 720px;
+}
+
+.lineup-no-results {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.75rem;
+  color: var(--muted-text);
+}
+
+.report-context {
+  margin-bottom: 1rem;
+  color: var(--muted-text);
+}
+
+.report-context strong {
+  color: var(--text-color);
+}
+
+.report-context p {
+  margin: 0.35rem 0;
+}
+
+.report-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.report-toolbar label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 220px;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.practice-total {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.practice-total span {
+  color: var(--muted-text);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.song-detail-actions,
+.practice-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.song-detail-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.practice-controls label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 150px;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.practice-controls button {
+  flex: 0 0 auto;
 }
 
 .link-text {
@@ -468,6 +1105,33 @@ tbody tr:hover td {
   background: var(--card-background);
 }
 
+.offline-media-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.65rem 0;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.cache-status {
+  color: var(--muted-text);
+  font-size: 0.78rem;
+}
+
+.offline-status {
+  position: sticky;
+  z-index: 4;
+  top: 68px;
+  padding: 0.55rem 1.5rem;
+  border-bottom: 1px solid #d9ad5c;
+  background: #fff3cf;
+  color: #6f5018;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .app-loading {
   display: grid;
   min-height: 100vh;
@@ -487,6 +1151,92 @@ tbody tr:hover td {
 }
 
 @media (max-width: 860px) {
+  .dashboard-service-heading,
+  .chordpro-toolbar {
+    align-items: flex-start;
+  }
+
+  .dashboard-service-heading,
+  .dashboard-actions {
+    flex-wrap: wrap;
+  }
+
+  .dashboard-service-songs,
+  .lineup-song-options {
+    grid-template-columns: 1fr;
+  }
+
+  .chordpro-sheet {
+    grid-template-columns: 1fr;
+  }
+
+  .lineup-assignment-form {
+    grid-template-columns: 1fr;
+  }
+
+  .practice-table,
+  .practice-table tbody,
+  .practice-table tr,
+  .practice-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .practice-table {
+    min-width: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .practice-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+  }
+
+  .practice-table tbody {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .practice-table tr {
+    padding: 0.5rem 0.85rem;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--card-background);
+  }
+
+  .practice-table td {
+    display: grid;
+    grid-template-columns: minmax(6rem, 0.7fr) minmax(0, 1.3fr);
+    gap: 0.75rem;
+    padding: 0.45rem 0 !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    text-align: right;
+  }
+
+  .practice-table td:last-child {
+    border-bottom: 0 !important;
+  }
+
+  .practice-table td::before {
+    content: attr(data-label);
+    color: var(--muted-text);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-align: left;
+    text-transform: uppercase;
+  }
+
+  .lineup-assignment-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .app-header {
     min-height: 62px;
     padding: 0 1rem;
@@ -564,11 +1314,32 @@ tbody tr:hover td {
   }
 
   .song-list-item {
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .song-list-item > strong {
-    width: 100%;
+  .page-container .song-list-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .page-container .song-list-item .song-list-summary {
+    grid-column: 1 / -1;
+  }
+
+  .catalog-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-filter-grid > label:first-child {
+    grid-column: auto;
+  }
+
+  .catalog-sort-direction {
+    grid-column: auto;
+  }
+
+  .announcement-heading {
+    flex-direction: column;
+    gap: 0.2rem;
   }
 
   th,
@@ -608,6 +1379,24 @@ tbody tr:hover td {
   input::placeholder,
   textarea::placeholder {
     color: #858da1;
+  }
+
+  .status-message-success {
+    border-color: #315a3d;
+    background: #1d3024;
+    color: #a7dfb3;
+  }
+
+  .status-message-warning {
+    border-color: #5a4a21;
+    background: #332b19;
+    color: #ead48c;
+  }
+
+  .status-message-error {
+    border-color: #65373d;
+    background: var(--danger-surface);
+    color: var(--danger-color);
   }
 
   .signin-page {

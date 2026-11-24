@@ -9,6 +9,7 @@ use tauri::Manager;
 pub mod auth;
 pub mod db;
 pub mod models;
+pub mod offline_cache;
 pub mod practice;
 pub mod sync;
 
@@ -20,6 +21,12 @@ pub fn run() {
             let store =
                 practice::PracticeStore::open(&database_path).map_err(std::io::Error::other)?;
             app.manage(store);
+            let cache_database_path =
+                app.path().app_data_dir()?.join("application-cache.sqlite3");
+            let cache_store =
+                offline_cache::OfflineCacheStore::open(&cache_database_path)
+                    .map_err(std::io::Error::other)?;
+            app.manage(cache_store);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -30,6 +37,8 @@ pub fn run() {
             practice::get_local_practice_history,
             practice::update_practice_sync_state,
             practice::make_pending_practice_private,
+            offline_cache::save_application_cache,
+            offline_cache::get_application_cache,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run ROL Worship Team");

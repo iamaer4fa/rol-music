@@ -1,83 +1,34 @@
 import { useEffect, useState } from 'react'
 import { invoke, isTauri } from '@tauri-apps/api/core'
+import { Link } from 'react-router-dom'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import '../App.css'
+import { getUpcomingServiceDate } from '../lib/workflow'
+import type { AnnouncementRecord, PersonalPracticeRecord, SongRecord } from '../lib/models'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
 
-const weekdayNumbers: Record<string, number> = {
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6,
-  Sun: 7,
-}
-
-function getUpcomingServiceDate(
-  now: Date,
-  timeZone: string,
-  serviceDay: number,
-  cutoffTime: string,
-): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now)
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((value) => value.type === type)?.value
-  const year = Number(part('year'))
-  const month = Number(part('month'))
-  const day = Number(part('day'))
-  const hour = Number(part('hour'))
-  const minute = Number(part('minute'))
-  const currentDay = weekdayNumbers[part('weekday') ?? '']
-  if (!year || !month || !day || !currentDay) {
-    throw new Error('Could not determine the current date in the team timezone.')
-  }
-
-  const cutoffParts = cutoffTime.split(':').map(Number)
-  const cutoffHour = cutoffParts[0] ?? Number.NaN
-  const cutoffMinute = cutoffParts[1] ?? Number.NaN
-  if (
-    !Number.isInteger(serviceDay) ||
-    serviceDay < 1 ||
-    serviceDay > 7 ||
-    !Number.isInteger(cutoffHour) ||
-    cutoffHour < 0 ||
-    cutoffHour > 23 ||
-    !Number.isInteger(cutoffMinute) ||
-    cutoffMinute < 0 ||
-    cutoffMinute > 59
-  ) {
-    throw new Error('Team service settings contain an invalid day or cutoff time.')
-  }
-  const minutesUntilCutoff = cutoffHour * 60 + cutoffMinute
-  const currentMinuteOfDay = hour * 60 + minute
-  let daysAhead = (serviceDay - currentDay + 7) % 7
-  if (daysAhead === 0 && currentMinuteOfDay >= minutesUntilCutoff) daysAhead = 7
-
-  const serviceDate = new Date(Date.UTC(year, month - 1, day + daysAhead))
-  return [
-    serviceDate.getUTCFullYear(),
-    String(serviceDate.getUTCMonth() + 1).padStart(2, '0'),
-    String(serviceDate.getUTCDate()).padStart(2, '0'),
-  ].join('-')
-}
 
 export default function HomeDashboard() {
   const { user, teamId } = useAuth()
-  const [upcomingService, setUpcomingService] = useState<{ serviceDate: string; serviceTitle: string; songs: any[] } | null>(null)
-  const [recentSongs, setRecentSongs] = useState<any[]>([])
-  const [recentAnnouncements, setRecentAnnouncements] = useState<any[]>([])
-  const [personalPractice, setPersonalPractice] = useState<any[]>([])
+  type UpcomingLineupItem = {
+    id: string
+    position: number
+    song_id: string
+    key_override: string | null
+    tempo_override: number | null
+    song: { id: string; title: string; key_signature: string | null; tempo_bpm: number | null } | Array<{ id: string; title: string; key_signature: string | null; tempo_bpm: number | null }> | null
+    selected_arrangement: { id: string; arrangement_name: string } | Array<{ id: string; arrangement_name: string }> | null
+  }
+  const [upcomingService, setUpcomingService] = useState<{ lineupId: string | null; serviceDate: string; serviceTitle: string; songs: UpcomingLineupItem[] } | null>(null)
+  const [serviceAssignments, setServiceAssignments] = useState<Array<{ role_name: string; preparation_status: string; display_name: string }>>([])
+  const [recentSongs, setRecentSongs] = useState<SongRecord[]>([])
+  const [recentAnnouncements, setRecentAnnouncements] = useState<AnnouncementRecord[]>([])
+  const [personalPractice, setPersonalPractice] = useState<PersonalPracticeRecord[]>([])
   const [syncStatus, setSyncStatus] = useState<'synced' | 'pending' | 'private' | 'offline' | 'error'>('synced')
+  const [syncCheckedAt, setSyncCheckedAt] = useState<string>(new Date().toISOString())
   const [dashboardError, setDashboardError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -116,7 +67,20 @@ export default function HomeDashboard() {
 
         const { data: publishedLineup, error: lineupError } = await supa
           .from('lineups')
-          .select('service_title, lineup_items(id)')
+          .select(`
+            id,
+            service_title,
+            lineup_items(
+              id,
+              position,
+              song_id,
+              key_override,
+              tempo_override,
+              transition_notes,
+              song:songs(id, title, key_signature, tempo_bpm),
+              selected_arrangement:song_arrangements(id, arrangement_name)
+            )
+          `)
           .eq('team_id', activeTeamId)
           .eq('service_date', serviceDate)
           .eq('status', 'published')
@@ -125,11 +89,34 @@ export default function HomeDashboard() {
           .maybeSingle()
         if (lineupError) throw lineupError
 
+        const lineupSongs = [...(publishedLineup?.lineup_items ?? [])].sort(
+          (left, right) => left.position - right.position,
+        )
         setUpcomingService({
+          lineupId: publishedLineup?.id ?? null,
           serviceDate: formattedDate,
           serviceTitle: publishedLineup?.service_title ?? `Service - ${formattedDate}`,
-          songs: publishedLineup?.lineup_items ?? [],
+          songs: lineupSongs,
         })
+
+        if (publishedLineup?.id) {
+          const { data: assignmentRows } = await supa
+            .from('lineup_assignments')
+            .select('user_id, role_name, preparation_status')
+            .eq('team_id', activeTeamId)
+            .eq('lineup_id', publishedLineup.id)
+          const userIds = [...new Set((assignmentRows ?? []).map((assignment) => assignment.user_id))]
+          const { data: assignmentProfiles } = userIds.length
+            ? await supa.from('profiles').select('id, display_name').in('id', userIds)
+            : { data: [] as Array<{ id: string; display_name: string | null }> }
+          setServiceAssignments((assignmentRows ?? []).map((assignment) => ({
+            role_name: assignment.role_name,
+            preparation_status: assignment.preparation_status,
+            display_name: assignmentProfiles?.find((profile) => profile.id === assignment.user_id)?.display_name ?? 'Team member',
+          })))
+        } else {
+          setServiceAssignments([])
+        }
 
         // Fetch recent songs
         const { data: songs, error: songsError } = await supa
@@ -171,7 +158,7 @@ export default function HomeDashboard() {
           session_id: string
           started_at: string
           actual_practice_duration_seconds: number
-          sync_state?: string
+          sync_state?: 'pending' | 'synced' | 'private' | 'error'
         }> = []
         if (isTauri()) {
           try {
@@ -185,7 +172,7 @@ export default function HomeDashboard() {
           }
         }
 
-        const sessionsById = new Map<string, any>(
+        const sessionsById = new Map<string, PersonalPracticeRecord>(
           (practice ?? []).map((session) => [session.session_id, { ...session, sync_state: 'synced' }])
         )
         for (const session of localPractice) {
@@ -196,6 +183,7 @@ export default function HomeDashboard() {
             .sort((left, right) => Date.parse(right.started_at) - Date.parse(left.started_at))
             .slice(0, 5)
         )
+        setSyncCheckedAt(new Date().toISOString())
         if (!navigator.onLine) {
           setSyncStatus('offline')
         } else if (practiceError) {
@@ -221,20 +209,77 @@ export default function HomeDashboard() {
   }, [user?.id, teamId])
 
   if (loading) {
-    return <div>Loading dashboard...</div>
+    return <div className="page-container"><h2>Home Dashboard</h2><LoadingSkeleton rows={5} label="Loading dashboard" /></div>
   }
 
   return (
     <div className="page-container">
       <h2>Home Dashboard</h2>
-      {dashboardError && <p className="error-message" role="alert">{dashboardError}</p>}
+      {dashboardError && <StatusMessage tone="error">{dashboardError}</StatusMessage>}
 
       <div className="dashboard-grid">
         {upcomingService && (
           <div className="card dashboard-card-featured">
-            <h3>Upcoming Service</h3>
-            <p>{upcomingService.serviceTitle}</p>
-            <p>Songs: {upcomingService.songs.length > 0 ? `${upcomingService.songs.length} scheduled` : 'No songs assigned yet'}</p>
+            <div className="dashboard-service-heading">
+              <div>
+                <h3>Upcoming Service</h3>
+                <p className="dashboard-service-date">{upcomingService.serviceDate}</p>
+              </div>
+              <div className="dashboard-actions">
+                {upcomingService.lineupId && (
+                  <Link className="btn-secondary" to={`/lineup?lineupId=${upcomingService.lineupId}`}>
+                    Open lineup
+                  </Link>
+                )}
+                {upcomingService.songs[0]?.song_id && (
+                  <Link className="btn-primary" to={`/practice/${upcomingService.songs[0].song_id}`}>
+                    Practice next song
+                  </Link>
+                )}
+              </div>
+            </div>
+            <h4>{upcomingService.serviceTitle}</h4>
+            {upcomingService.songs.length > 0 ? (
+              <ol className="dashboard-service-songs">
+                {upcomingService.songs.map((item) => {
+                  const song = Array.isArray(item.song) ? item.song[0] : item.song
+                  const arrangement = Array.isArray(item.selected_arrangement)
+                    ? item.selected_arrangement[0]
+                    : item.selected_arrangement
+                  return (
+                    <li key={item.id}>
+                      <Link to={`/song/${item.song_id}`}>
+                        <strong>{song?.title ?? 'Unknown song'}</strong>
+                      </Link>
+                      <span>
+                        {item.key_override ?? song?.key_signature ?? '—'}
+                        {' · '}
+                        {item.tempo_override ?? song?.tempo_bpm ?? '—'}{song?.tempo_bpm ? ' BPM' : ''}
+                        {arrangement?.arrangement_name ? ` · ${arrangement.arrangement_name}` : ''}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ol>
+            ) : (
+              <EmptyState title="No songs in this lineup yet">
+                Open the lineup to review service preparation.
+              </EmptyState>
+            )}
+            {serviceAssignments.length > 0 && (
+              <div className="dashboard-service-assignments">
+                <h4>Team assignments</h4>
+                <ul>
+                  {serviceAssignments.map((assignment, index) => (
+                    <li key={`${assignment.display_name}-${assignment.role_name}-${index}`}>
+                      <strong>{assignment.display_name}</strong>
+                      {' · '}{assignment.role_name}
+                      {' · '}<span>{assignment.preparation_status.replace('_', ' ')}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
@@ -280,7 +325,7 @@ export default function HomeDashboard() {
         <div className="card">
           <h3>Synchronization Status</h3>
           <p>Status: {syncStatus}</p>
-          <p>Last checked: just now</p>
+          <p>Last checked: {new Date(syncCheckedAt).toLocaleString()}</p>
           <small>
             Practice records are synchronized when online and consent is enabled.
           </small>

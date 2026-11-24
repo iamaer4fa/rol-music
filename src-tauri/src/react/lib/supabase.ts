@@ -10,14 +10,36 @@ if (!supabaseUrl || !supabaseKey) {
   throw new Error('SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must be configured in .env')
 }
 
+export type Database = {
+  public: {
+    Tables: {
+      practice_sessions: {
+        Row: import('./models').PracticeSessionRecord
+        Insert: import('./models').PracticeSessionRecord
+        Update: Partial<import('./models').PracticeSessionRecord>
+      }
+      songs: {
+        Row: import('./models').SongRecord
+        Insert: Partial<import('./models').SongRecord> & Pick<import('./models').SongRecord, 'team_id' | 'title' | 'chordpro_lyrics'>
+        Update: Partial<import('./models').SongRecord>
+      }
+      team_posts: {
+        Row: import('./models').AnnouncementRecord
+        Insert: Partial<import('./models').AnnouncementRecord>
+        Update: Partial<import('./models').AnnouncementRecord>
+      }
+    }
+  }
+}
+
 export const supa = createClient(supabaseUrl, supabaseKey)
 
 // Types for auth
 export type SupabaseUser = {
   id: string
   email: string | null
-  app_metadata: any
-  user_metadata: any
+  app_metadata: Record<string, unknown>
+  user_metadata: Record<string, unknown>
   aud: string
   role: string | null
 }

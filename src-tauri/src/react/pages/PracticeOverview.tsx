@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import '../App.css'
+import type { PracticeSessionRecord, MemberPracticeSummary, SongPracticeSummary } from '../lib/models'
+import { escapeCsv, getWeekdayName, getWeekEndDate, getWeekStartDate } from '../lib/reporting'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
 
 export default function PracticeOverview() {
   const {
@@ -14,20 +19,46 @@ export default function PracticeOverview() {
   const isAuthorized = accessRole === 'worship_leader' || accessRole === 'worship_team_director'
 
   const [teamPracticeTotal, setTeamPracticeTotal] = useState(0)
-  const [memberPracticeSummaries, setMemberPracticeSummaries] = useState<any[]>([])
-  const [songPracticeSummaries, setSongPracticeSummaries] = useState<any[]>([])
-  const [recentSessions, setRecentSessions] = useState<any[]>([])
-  const [members, setMembers] = useState<any[]>([])
-  const [songs, setSongs] = useState<any[]>([])
+  const [memberPracticeSummaries, setMemberPracticeSummaries] = useState<MemberPracticeSummary[]>([])
+  const [songPracticeSummaries, setSongPracticeSummaries] = useState<SongPracticeSummary[]>([])
+  const [recentSessions, setRecentSessions] = useState<PracticeSessionRecord[]>([])
+  const [members, setMembers] = useState<Array<{ user_id: string; access_role: string; practice_sharing_enabled: boolean; display_name?: string }>>([])
+  const [songs, setSongs] = useState<Array<{ id: string; title: string }>>([])
   const [selectedMember, setSelectedMember] = useState<string | null>(null)
   const [selectedSong, setSelectedSong] = useState<string | null>(null)
-  const [selectedWeek, setSelectedWeek] = useState<Date | null>(null)
+  const [selectedWeek, setSelectedWeek] = useState<string | null>(null)
+  const [teamTimezone, setTeamTimezone] = useState('Asia/Manila')
+  const [weekStartsOn, setWeekStartsOn] = useState(1)
   const [loadingState, setLoadingState] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!teamId) return
+    void supa
+      .from('team_settings')
+      .select('iana_timezone, week_starts_on')
+      .eq('team_id', teamId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const timezone = data?.iana_timezone ?? 'Asia/Manila'
+        const startsOn = data?.week_starts_on ?? 1
+        setTeamTimezone(timezone)
+        setWeekStartsOn(startsOn)
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: timezone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).formatToParts(new Date())
+        const part = (type: string) => parts.find((item) => item.type === type)?.value
+        const today = `${part('year')}-${part('month')}-${part('day')}`
+        setSelectedWeek(getWeekStartDate(today, startsOn))
+      })
+  }, [teamId])
+
+  useEffect(() => {
     async function loadData() {
-      if (!user?.id || !teamId || !isAuthorized) return
+      if (!user?.id || !teamId || !isAuthorized || !selectedWeek) return
 
       setLoadingState(true)
       try {
@@ -65,7 +96,7 @@ export default function PracticeOverview() {
         const consentingUserIds = teamMembers
           .filter((member) => member.practice_sharing_enabled)
           .map((member) => member.user_id)
-        let sessionsData: any[] = []
+        let sessionsData: PracticeSessionRecord[] = []
         if (consentingUserIds.length > 0) {
           let query = supa
             .from('practice_sessions')
@@ -75,6 +106,12 @@ export default function PracticeOverview() {
 
           if (selectedMember) query = query.eq('user_id', selectedMember)
           if (selectedSong) query = query.eq('song_id', selectedSong)
+          const weekStart = new Date(`${selectedWeek}T00:00:00`)
+          const weekEnd = new Date(weekStart)
+          weekEnd.setDate(weekEnd.getDate() + 7)
+          query = query
+            .gte('started_at', weekStart.toISOString())
+            .lt('started_at', weekEnd.toISOString())
 
           const { data, error: sessionsError } = await query
             .order('started_at', { ascending: false })
@@ -170,171 +207,189 @@ export default function PracticeOverview() {
     }
 
     loadData()
-  }, [user?.id, teamId, selectedMember, selectedSong, isAuthorized])
+  }, [user?.id, teamId, selectedMember, selectedSong, selectedWeek, isAuthorized])
 
   if (!isAuthorized && user?.id) {
     return <div className="alert alert-error">Access denied. This view is for Worship Leaders and Worship Team Directors only.</div>
   }
 
   if (loadingState) {
-    return <div>Loading practice overview...</div>
+    return <div className="page-container"><h2>Practice Overview</h2><LoadingSkeleton rows={5} label="Loading practice report" /></div>
   }
 
   if (error) {
-    return <div style={{ color: 'red' }}>Error: {error}</div>
+    return <div className="page-container"><h2>Practice Overview</h2><StatusMessage tone="error">{error}</StatusMessage></div>
   }
 
-  // Determine the selected week (default to current week)
-  const weekStart = selectedWeek ? new Date(selectedWeek) : new Date()
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 7)
+  function exportCsv() {
+    const memberLookup = new Map(members.map((member) => [member.user_id, member.display_name ?? 'Unknown']))
+    const songLookup = new Map(songs.map((song) => [song.id, song.title]))
+    const rows = [
+      ['Member', 'Song', 'Started at', 'Duration seconds', 'Playback speed', 'Loop repetitions'],
+      ...recentSessions.map((session) => [
+        memberLookup.get(session.user_id) ?? 'Unknown',
+        songLookup.get(session.song_id) ?? 'Unknown',
+        session.started_at,
+        session.actual_practice_duration_seconds,
+        session.playback_speed,
+        session.loop_repetitions,
+      ]),
+    ]
+    const csv = rows.map((row) => row.map((value) => escapeCsv(value)).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `practice-report-${selectedWeek ?? 'report'}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="page-container">
       <h2>Practice Overview</h2>
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
       
       {isAuthorized ? (
         <>
-          {/* Team selector */}
           {members.length > 0 && (
-            <div style={{ marginBottom: '1rem' }}>
-              <strong>Team:</strong> {teamId || 'Unknown team'}
-              <br />
-              <small>Members with practice sharing enabled: {memberPracticeSummaries.filter(m => m.totalSeconds > 0).length}</small>
-            </div>
+            <section className="report-context">
+              <strong>Reporting context</strong>
+              <p>
+                Week starts on {getWeekdayName(weekStartsOn)} · Team timezone {teamTimezone}
+              </p>
+              {selectedWeek && (
+                <p>
+                  Data range: {selectedWeek} to {getWeekEndDate(selectedWeek)}
+                  {' · '}Consenting members: {members.filter((member) => member.practice_sharing_enabled).length}
+                  {' · '}Shared sessions in range: {recentSessions.length}
+                  {' · '}Returned sample size limit: 50
+                </p>
+              )}
+              <small>
+                Rehearsal reports summarize voluntarily shared practice duration and frequency.
+                They are not proof of attendance, readiness, or musical performance.
+              </small>
+            </section>
           )}
 
-          {/* Week selector */}
-          <div style={{ marginBottom: '1rem' }}>
-            <strong>Select Week:</strong> 
-            <input 
-              type="date" 
-              value={selectedWeek?.toISOString().split('T')[0] || ''}
-              onChange={(e) => setSelectedWeek(new Date(e.target.value))}
-            />
+          <div className="report-toolbar">
+            <label>
+              Select week
+              <input
+                type="date"
+                value={selectedWeek ?? ''}
+                onChange={(event) => setSelectedWeek(getWeekStartDate(event.target.value, weekStartsOn))}
+              />
+            </label>
+            <button type="button" className="btn-primary" onClick={exportCsv} disabled={recentSessions.length === 0}>
+              Export CSV
+            </button>
           </div>
         </>
       ) : null}
 
-      {/* Team Practice Total */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
+      {isAuthorized && (
+        <div className="card">
+          <h3>Privacy and retention</h3>
+          <p>
+            These summaries include only members who opted in to sharing for the selected range.
+            Turning sharing off retains previously uploaded server records but removes leadership
+            visibility through database policies; private local history remains on the device.
+          </p>
+        </div>
+      )}
+
+      <div className="card">
         <h3>Team Practice Total</h3>
-        <p>{(teamPracticeTotal / 3600).toFixed(1)} hours ({teamPracticeTotal} seconds)</p>
+        <p className="practice-total">{(teamPracticeTotal / 3600).toFixed(1)} hours <span>({teamPracticeTotal} seconds)</span></p>
       </div>
 
-      {/* Member Practice Summaries */}
-      {isAuthorized && memberPracticeSummaries.length > 0 && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
+      {isAuthorized && (
+        <div className="card">
           <h3>Practice by Member</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ padding: '8px', border: '1px solid #ddd' }}>Member</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}></th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>Total Time</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {memberPracticeSummaries.slice(0, 10).map((member, index) => (
-                <tr key={member.userId} style={{ 
-                  background: index % 2 === 0 ? '#f8f9fa' : 'white',
-                  borderBottom: '1px solid #ddd'
-                }}>
-                  <td style={{ padding: '8px' }}>{member.displayName}</td>
-                  <td style={{ padding: '8px', textAlign: 'center' }}>
-                    {member.sessionCount} sessions
-                  </td>
-                  <td style={{ padding: '8px', textAlign: 'center' }}>
-                    {(member.totalSeconds / 60).toFixed(1)} min
-                  </td>
-                  <td style={{ padding: '8px' }}>
-                    {member.role || ''}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {memberPracticeSummaries.length === 0 ? (
+            <EmptyState title="No shared member practice in this date range">
+              Only members who opted in to sharing are included in these summaries.
+            </EmptyState>
+          ) : (
+            <div className="table-scroll" role="region" aria-label="Practice by member" tabIndex={0}>
+              <table className="responsive-table practice-table">
+                <thead>
+                  <tr><th>Member</th><th>Frequency</th><th>Total Time</th><th>Role</th></tr>
+                </thead>
+                <tbody>
+                  {memberPracticeSummaries.slice(0, 10).map((member) => (
+                    <tr key={member.userId}>
+                      <td data-label="Member">{member.displayName}</td>
+                      <td data-label="Frequency">{member.sessionCount} sessions</td>
+                      <td data-label="Total time">{(member.totalSeconds / 60).toFixed(1)} min</td>
+                      <td data-label="Role">{member.role || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Song Practice Summaries */}
-      {isAuthorized && songPracticeSummaries.length > 0 && (
-        <div className="card" style={{ marginBottom: '1.5rem' }}>
+      {isAuthorized && (
+        <div className="card">
           <h3>Practice by Song</h3>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ padding: '8px', border: '1px solid #ddd' }}>Song</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}></th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>Total Time</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {songPracticeSummaries.slice(0, 10).map((song, index) => (
-                <tr key={song.songId} style={{ 
-                  background: index % 2 === 0 ? '#f8f9fa' : 'white',
-                  borderBottom: '1px solid #ddd'
-                }}>
-                  <td style={{ padding: '8px' }}>{song.title}</td>
-                  <td style={{ padding: '8px', textAlign: 'center' }}>
-                    {song.sessionCount} sessions
-                  </td>
-                  <td style={{ padding: '8px', textAlign: 'center' }}>
-                    {(song.totalSeconds / 60).toFixed(1)} min
-                  </td>
-                  <td style={{ padding: '8px' }}>{song.totalSeconds > 0 ? 'Yes' : 'No'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {songPracticeSummaries.length === 0 ? (
+            <EmptyState title="No song activity for this date range">
+              Shared practice totals will appear after members opt in and practice.
+            </EmptyState>
+          ) : (
+            <div className="table-scroll" role="region" aria-label="Practice by song" tabIndex={0}>
+              <table className="responsive-table practice-table">
+                <thead>
+                  <tr><th>Song</th><th>Frequency</th><th>Total Time</th></tr>
+                </thead>
+                <tbody>
+                  {songPracticeSummaries.slice(0, 10).map((song) => (
+                    <tr key={song.songId}>
+                      <td data-label="Song">{song.title}</td>
+                      <td data-label="Frequency">{song.sessionCount} sessions</td>
+                      <td data-label="Total time">{(song.totalSeconds / 60).toFixed(1)} min</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Recent Shared Practice Sessions */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
+      <div className="card">
         <h3>Recent Shared Practice Sessions</h3>
         {recentSessions.length === 0 ? (
-          <p>No practice sessions found.</p>
+          <EmptyState title="No shared practice sessions for this date range">
+            Try a different week or review the team’s sharing preferences.
+          </EmptyState>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ padding: '8px', border: '1px solid #ddd' }}>Member</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>Song</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}></th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>Duration</th>
-                <th style={{ padding: '8px', border: '1px solid #ddd', textAlign: 'center' }}>Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentSessions.slice(0, 10).map((session, index) => {
-                const member = members.find(m => m.user_id === session.user_id)
-                const song = songs.find(s => s.id === session.song_id)
-                const durationMinutes = (session.actual_practice_duration_seconds / 60).toFixed(1)
-                return (
-                  <tr key={index} style={{ borderBottom: '1px solid #ddd' }}>
-                    <td style={{ padding: '8px' }}>
-                      {member?.display_name || 'Unknown'}
-                    </td>
-                    <td style={{ padding: '8px' }}>
-                      {song?.title || 'Unknown'}
-                    </td>
-                    <td style={{ padding: '8px', textAlign: 'center' }}>
-                      {session.actual_practice_duration_seconds > 0 ? 'Yes' : 'No'}
-                    </td>
-                    <td style={{ padding: '8px', textAlign: 'center' }}>
-                      {durationMinutes} min
-                    </td>
-                    <td style={{ padding: '8px' }}>
-                      {new Date(session.started_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div className="table-scroll" role="region" aria-label="Recent shared practice sessions" tabIndex={0}>
+            <table className="responsive-table practice-table">
+              <thead>
+                <tr><th>Member</th><th>Song</th><th>Duration</th><th>Date</th></tr>
+              </thead>
+              <tbody>
+                {recentSessions.slice(0, 10).map((session) => {
+                  const member = members.find((candidate) => candidate.user_id === session.user_id)
+                  const song = songs.find((candidate) => candidate.id === session.song_id)
+                  return (
+                    <tr key={session.session_id}>
+                      <td data-label="Member">{member?.display_name || 'Unknown'}</td>
+                      <td data-label="Song">{song?.title || 'Unknown'}</td>
+                      <td data-label="Duration">{(session.actual_practice_duration_seconds / 60).toFixed(1)} min</td>
+                      <td data-label="Date">{new Date(session.started_at).toLocaleDateString()}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

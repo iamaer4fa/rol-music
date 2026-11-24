@@ -3,15 +3,24 @@ import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import { useNavigate } from 'react-router-dom'
 import { classifyMediaUrl } from '../lib/media'
+import { readApplicationCache, saveApplicationCache } from '../lib/offline'
+import type { SongRecord } from '../lib/models'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
 import '../App.css'
+
+type SortField = 'title' | 'artist' | 'key' | 'tempo'
 
 export default function SongCatalog() {
   const { user, teamId, accessRole } = useAuth()
   const navigate = useNavigate()
-  const [songs, setSongs] = useState<any[]>([])
+  const [songs, setSongs] = useState<SongRecord[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [sortField, setSortField] = useState<SortField>('title')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -34,6 +43,7 @@ export default function SongCatalog() {
   const [performanceNotes, setPerformanceNotes] = useState('')
   const [audioUrl, setAudioUrl] = useState('')
   const [audioDescription, setAudioDescription] = useState('')
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState<string | null>(null)
   const isLeader = accessRole === 'worship_leader'
 
   useEffect(() => {
@@ -49,31 +59,50 @@ export default function SongCatalog() {
 
     let cancelled = false
     async function loadSongs() {
+      const activeTeamId = teamId
+      if (!activeTeamId) return
       setLoading(true)
       setLoadError(null)
+      const cached = await readApplicationCache<SongRecord[]>(
+        activeTeamId,
+        'songs:all',
+      ).catch(() => null)
+      let hasCachedSongs = false
+      if (!cancelled && cached) {
+        hasCachedSongs = true
+        setSongs(cached.data)
+        setCacheUpdatedAt(cached.updatedAt)
+      }
       try {
         let query = supa
           .from('songs')
-          .select('*, tag_links:songs_tags(tag:song_tags(id, tag_name))')
-          .eq('team_id', teamId)
+          .select('*, tag_links:songs_tags(tag:song_tags(id, tag_name)), arrangements:song_arrangements(id, arrangement_name, key, capo_position, tempo_override, performance_notes)')
+          .eq('team_id', activeTeamId)
           .eq('is_active', true)
-        if (selectedKey) {
-          query = query.eq('key_signature', selectedKey)
-        }
-
         const { data, error } = await query.order('title', { ascending: true })
         if (error) throw error
         if (!cancelled) {
-          setSongs((data ?? []).map((song) => ({
+          const mappedSongs = (data ?? []).map((song) => ({
             ...song,
-            tags: song.tag_links?.flatMap((link: any) => link.tag ? [link.tag] : []) ?? [],
-          })))
+            arrangements: song.arrangements ?? [],
+            tags: song.tag_links?.flatMap((link: { tag?: { id: string; tag_name: string } | Array<{ id: string; tag_name: string }> }) => {
+              if (Array.isArray(link.tag)) return link.tag
+              return link.tag ? [link.tag] : []
+            }) ?? [],
+          }))
+          setSongs(mappedSongs)
+          setCacheUpdatedAt(new Date().toISOString())
+          await saveApplicationCache(activeTeamId, 'songs:all', mappedSongs)
         }
       } catch (err) {
         console.error('Error loading songs:', err)
         if (!cancelled) {
-          setSongs([])
-          setLoadError('Unable to load songs. Check your team membership and database setup.')
+          if (!hasCachedSongs) setSongs([])
+          setLoadError(
+            hasCachedSongs
+              ? 'Unable to refresh the catalog. Showing your saved copy.'
+              : 'Unable to load songs. Check your team membership and database setup.'
+          )
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -84,18 +113,42 @@ export default function SongCatalog() {
     return () => {
       cancelled = true
     }
-  }, [user?.id, teamId, selectedKey])
+  }, [user?.id, teamId])
 
   const filteredSongs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     return songs.filter((song) => {
       const matchesQuery = !query ||
-        [song.title, song.artist].some((value) => value?.toLowerCase().includes(query))
+        [song.title, song.artist, ...(song.arrangements ?? []).flatMap((arrangement) => [
+          arrangement.arrangement_name,
+          arrangement.key,
+          arrangement.performance_notes,
+        ])].some((value) => value?.toLowerCase().includes(query))
       const matchesTag = !selectedTag ||
-        song.tags.some((tag: { tag_name: string }) => tag.tag_name === selectedTag)
-      return matchesQuery && matchesTag
+        (song.tags ?? []).some((tag: { tag_name: string }) => tag.tag_name === selectedTag)
+      const matchesKey = !selectedKey || song.key_signature === selectedKey
+      return matchesQuery && matchesTag && matchesKey
     })
-  }, [searchQuery, selectedTag, songs])
+  }, [searchQuery, selectedKey, selectedTag, songs])
+
+  const sortedSongs = useMemo(() => {
+    const valueFor = (song: SongRecord) => {
+      switch (sortField) {
+        case 'artist': return song.artist ?? ''
+        case 'key': return song.key_signature ?? ''
+        case 'tempo': return song.tempo_bpm ?? 0
+        default: return song.title
+      }
+    }
+    return [...filteredSongs].sort((left, right) => {
+      const leftValue = valueFor(left)
+      const rightValue = valueFor(right)
+      const compared = typeof leftValue === 'number' && typeof rightValue === 'number'
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: 'base' })
+      return sortDirection === 'asc' ? compared : -compared
+    })
+  }, [filteredSongs, sortDirection, sortField])
 
   async function createSong(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -140,7 +193,7 @@ export default function SongCatalog() {
           chordpro_lyrics: lyrics.trim(),
           song_notes: songNotes.trim() || null,
       }
-      let song: any
+      let song: SongRecord
       if (editingSongId) {
         const existingSong = songs.find((item) => item.id === editingSongId)
         if (!existingSong) throw new Error('The song being edited is no longer available.')
@@ -269,7 +322,13 @@ export default function SongCatalog() {
   return (
     <div className="page-container">
       <h2>Song Catalog</h2>
-      {saveNotice && <p role="status">{saveNotice}</p>}
+      {cacheUpdatedAt && (
+        <p className="cache-status" role="status">
+          Catalog cached {new Date(cacheUpdatedAt).toLocaleString()}
+          {!navigator.onLine ? ' · Showing offline cache' : ''}
+        </p>
+      )}
+      {saveNotice && <StatusMessage tone="success">{saveNotice}</StatusMessage>}
       {isLeader && (
         <button
           type="button"
@@ -285,7 +344,7 @@ export default function SongCatalog() {
       {showCreateForm && isLeader && (
         <form className="card" onSubmit={(event) => void createSong(event)}>
           <h3>{editingSongId ? 'Edit song' : 'New song'}</h3>
-          {formError && <p className="error-message" role="alert">{formError}</p>}
+          {formError && <StatusMessage tone="error">{formError}</StatusMessage>}
           <label>
             Title
             <input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={255} required />
@@ -373,19 +432,23 @@ export default function SongCatalog() {
         </form>
       )}
 
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
+      <div className="card catalog-filters">
         <h3>Search & Filter</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-          <div>
+        <div className="catalog-filter-grid">
+          <label>
+            Search songs and arrangements
             <input
-              type="text"
-              placeholder="Search songs..."
+              type="search"
+              placeholder="Title, artist, arrangement, key, or notes"
+              aria-label="Search songs and arrangements"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-          </div>
-          <div>
+          </label>
+          <label>
+            Tag
             <select
+              aria-label="Filter songs by tag"
               value={selectedTag ?? ''}
               onChange={(e) => setSelectedTag(e.target.value || null)}
             >
@@ -394,38 +457,91 @@ export default function SongCatalog() {
                 <option key={tag} value={tag}>{tag}</option>
               ))}
             </select>
-          </div>
-          <div>
+          </label>
+          <label>
+            Key
             <select
+              aria-label="Filter songs by key"
               value={selectedKey ?? ''}
               onChange={(e) => setSelectedKey(e.target.value || null)}
             >
               <option value="">All Keys</option>
-              <option>C</option>
-              <option>G</option>
-              <option>D</option>
-              <option>A</option>
-              <option>E</option>
+              {[...new Set(songs.map((song) => song.key_signature).filter((key): key is string => Boolean(key)))]
+                .sort((left, right) => left.localeCompare(right))
+                .map((key) => <option key={key}>{key}</option>)}
             </select>
-          </div>
+          </label>
+          <label>
+            Sort by
+            <select value={sortField} onChange={(event) => setSortField(event.target.value as SortField)}>
+              <option value="title">Title</option>
+              <option value="artist">Artist</option>
+              <option value="key">Key</option>
+              <option value="tempo">Tempo</option>
+            </select>
+          </label>
+          <label className="catalog-sort-direction">
+            Sort direction
+            <select
+              value={sortDirection}
+              onChange={(event) => setSortDirection(event.target.value as 'asc' | 'desc')}
+            >
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </label>
         </div>
+        <p className="filter-result-count" role="status" aria-live="polite">
+          {sortedSongs.length} {sortedSongs.length === 1 ? 'song' : 'songs'}
+        </p>
       </div>
 
-      {loading ? (
-        <p>Loading songs...</p>
-      ) : loadError ? (
-        <p role="alert">{loadError}</p>
-      ) : filteredSongs.length === 0 ? (
-        <p>No songs found. Ask a Worship Leader to add songs to the catalog.</p>
+      {loading && songs.length === 0 ? (
+        <LoadingSkeleton rows={5} label="Loading song catalog" />
       ) : (
-        <ul className="song-list">
-          {filteredSongs.map((song) => (
+        <>
+        {loadError && <StatusMessage tone={songs.length ? 'warning' : 'error'}>{loadError}</StatusMessage>}
+        {sortedSongs.length === 0 ? (
+          <EmptyState
+            title={loadError ? 'Catalog unavailable' : songs.length ? 'No songs match these filters' : 'Your song catalog is empty'}
+          >
+            {loadError
+              ? 'Check your connection or team access, then try again.'
+              : songs.length
+                ? 'Try another search term or clear one or more filters.'
+                : 'Ask a Worship Leader to add songs to the catalog.'}
+          </EmptyState>
+        ) : (
+        <ul className="song-list" aria-label="Songs">
+          {sortedSongs.map((song) => (
             <li key={song.id} className="song-list-item">
-              <strong>{song.title}</strong>{song.artist ? ` - ${song.artist}` : ''}
-              {song.key_signature ? ` (${song.key_signature})` : ''}
+              <div className="song-list-summary">
+                <strong>{song.title}</strong>
+                <span>{song.artist || 'Artist not set'}{song.key_signature ? ` · ${song.key_signature}` : ''}{song.tempo_bpm ? ` · ${song.tempo_bpm} BPM` : ''}</span>
+              </div>
+              {(song.arrangements ?? []).length > 0 && (
+                <details className="song-arrangement-preview">
+                  <summary>Arrangements ({song.arrangements?.length})</summary>
+                  <ul>
+                    {song.arrangements?.map((arrangement) => (
+                      <li key={arrangement.id}>
+                        <strong>{arrangement.arrangement_name}</strong>
+                        <span>
+                          {arrangement.key ? ` · ${arrangement.key}` : ''}
+                          {` · Capo ${arrangement.capo_position}`}
+                          {arrangement.tempo_override ? ` · ${arrangement.tempo_override} BPM` : ''}
+                        </span>
+                        {arrangement.performance_notes && <p>{arrangement.performance_notes}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <button
+                type="button"
                 className="btn-secondary"
                 onClick={() => navigate(`/song/${song.id}`)}
+                aria-label={`View ${song.title}`}
               >
                 View
               </button>
@@ -451,6 +567,8 @@ export default function SongCatalog() {
             </li>
           ))}
         </ul>
+        )}
+        </>
       )}
     </div>
   )

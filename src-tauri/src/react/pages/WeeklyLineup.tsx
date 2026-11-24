@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { readApplicationCache, saveApplicationCache } from '../lib/offline'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
 import '../App.css'
 
 type LineupSong = {
@@ -29,17 +33,38 @@ type Lineup = {
 type CatalogSong = {
   id: string
   title: string
+  artist: string | null
   key_signature: string | null
   tempo_bpm: number | null
   arrangements: Array<{ id: string; arrangement_name: string }>
 }
 
+type TeamMember = {
+  user_id: string
+  display_name: string
+  access_role: string
+  musical_roles: string[]
+}
+
+type LineupAssignment = {
+  id: string
+  lineup_item_id: string
+  user_id: string
+  role_name: string
+  preparation_status: 'pending' | 'ready' | 'needs_help'
+  notes: string | null
+  display_name?: string
+}
+
 export default function WeeklyLineup() {
   const { user, teamId, accessRole } = useAuth()
   const { lineupId: routeLineupId } = useParams<{ lineupId: string }>()
+  const [searchParams] = useSearchParams()
+  const queryLineupId = searchParams.get('lineupId')
+  const requestedLineupId = routeLineupId ?? queryLineupId
   const isLeader = accessRole === 'worship_leader'
   const [lineups, setLineups] = useState<Array<{ id: string; service_date: string; service_title: string | null; status: Lineup['status'] }>>([])
-  const [selectedId, setSelectedId] = useState<string | null>(routeLineupId ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(requestedLineupId)
   const [lineup, setLineup] = useState<Lineup | null>(null)
   const [catalogSongs, setCatalogSongs] = useState<CatalogSong[]>([])
   const [selectedSongId, setSelectedSongId] = useState('')
@@ -50,6 +75,16 @@ export default function WeeklyLineup() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [serviceDate, setServiceDate] = useState(new Date().toISOString().slice(0, 10))
   const [serviceTitle, setServiceTitle] = useState('Sunday Worship')
+  const [lineupSongSearch, setLineupSongSearch] = useState('')
+  const [selectedBatchSongIds, setSelectedBatchSongIds] = useState<string[]>([])
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
+  const [lineupHistory, setLineupHistory] = useState<Array<{ id: string; action: string; details: Record<string, unknown>; created_at: string }>>([])
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [lineupAssignments, setLineupAssignments] = useState<LineupAssignment[]>([])
+  const [assignmentItemId, setAssignmentItemId] = useState('')
+  const [assignmentUserId, setAssignmentUserId] = useState('')
+  const [assignmentRole, setAssignmentRole] = useState('')
+  const [assignmentStatus, setAssignmentStatus] = useState<'pending' | 'ready' | 'needs_help'>('pending')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,6 +92,16 @@ export default function WeeklyLineup() {
 
   const loadLineup = useCallback(async (id: string) => {
     if (!teamId) return
+    const cached = await readApplicationCache<{
+      lineup: Lineup
+      history: Array<{ id: string; action: string; details: Record<string, unknown>; created_at: string }>
+      assignments: LineupAssignment[]
+    }>(teamId, `lineup:${id}`).catch(() => null)
+    if (cached) {
+      setLineup(cached.data.lineup)
+      setLineupHistory(cached.data.history)
+      setLineupAssignments(cached.data.assignments)
+    }
     const { data, error: loadError } = await supa
       .from('lineups')
       .select(`
@@ -74,6 +119,7 @@ export default function WeeklyLineup() {
     if (loadError) throw loadError
     if (!data) {
       setLineup(null)
+      setLineupHistory([])
       return
     }
 
@@ -84,6 +130,33 @@ export default function WeeklyLineup() {
       status: data.status,
       version: data.version,
       songs: [...(data.lineup_items ?? [])].sort((a, b) => a.position - b.position) as LineupSong[],
+    })
+    const { data: history } = await supa
+      .from('lineup_change_history')
+      .select('id, action, details, created_at')
+      .eq('team_id', teamId)
+      .eq('lineup_id', id)
+      .order('created_at', { ascending: false })
+      .limit(20)
+    setLineupHistory(history ?? [])
+    const { data: assignments } = await supa
+      .from('lineup_assignments')
+      .select('id, lineup_item_id, user_id, role_name, preparation_status, notes')
+      .eq('team_id', teamId)
+      .eq('lineup_id', id)
+      .order('role_name')
+    setLineupAssignments(assignments ?? [])
+    await saveApplicationCache(teamId, `lineup:${id}`, {
+      lineup: {
+        id: data.id,
+        service_date: data.service_date,
+        title: data.service_title ?? 'Worship Service',
+        status: data.status,
+        version: data.version,
+        songs: [...(data.lineup_items ?? [])].sort((a, b) => a.position - b.position),
+      },
+      history: history ?? [],
+      assignments: assignments ?? [],
     })
   }, [teamId])
 
@@ -97,35 +170,56 @@ export default function WeeklyLineup() {
 
     let active = true
     async function load() {
+      const activeTeamId = teamId
+      if (!activeTeamId) return
       setLoading(true)
       setError(null)
+      const cached = await readApplicationCache<Array<{ id: string; service_date: string; service_title: string | null; status: Lineup['status'] }>>(activeTeamId, 'lineups').catch(() => null)
+      if (cached && active) setLineups(cached.data)
       try {
-        const [{ data: lineupRows, error: lineupError }, { data: songs, error: songsError }] =
+        const [{ data: lineupRows, error: lineupError }, { data: songs, error: songsError }, { data: memberRows, error: membersError }, { data: profileRows, error: profilesError }] =
           await Promise.all([
             supa
               .from('lineups')
               .select('id, service_date, service_title, status, version')
-              .eq('team_id', teamId)
+              .eq('team_id', activeTeamId)
               .order('service_date', { ascending: false })
               .order('version', { ascending: false })
               .limit(30),
             supa
               .from('songs')
-              .select('id, title, key_signature, tempo_bpm, arrangements:song_arrangements(id, arrangement_name)')
-              .eq('team_id', teamId)
+              .select('id, title, artist, key_signature, tempo_bpm, arrangements:song_arrangements(id, arrangement_name)')
+              .eq('team_id', activeTeamId)
               .eq('is_active', true)
               .order('title'),
+            supa
+              .from('team_members')
+              .select('user_id, access_role, musical_roles')
+              .eq('team_id', activeTeamId)
+              .eq('membership_status', 'active'),
+            supa
+              .from('profiles')
+              .select('id, display_name'),
           ])
         if (lineupError) throw lineupError
         if (songsError) throw songsError
+        if (membersError) throw membersError
+        if (profilesError) throw profilesError
         if (!active) return
 
         const rows = lineupRows ?? []
         setLineups(rows)
+        await saveApplicationCache(activeTeamId, 'lineups', rows)
         setCatalogSongs((songs ?? []) as CatalogSong[])
+        setTeamMembers((memberRows ?? []).map((member) => ({
+          user_id: member.user_id,
+          display_name: profileRows?.find((profile) => profile.id === member.user_id)?.display_name ?? 'Team member',
+          access_role: member.access_role,
+          musical_roles: Array.isArray(member.musical_roles) ? member.musical_roles : [],
+        })))
         const defaultId =
-          routeLineupId && rows.some((row) => row.id === routeLineupId)
-            ? routeLineupId
+          requestedLineupId && rows.some((row) => row.id === requestedLineupId)
+            ? requestedLineupId
             : rows.find((row) => row.status === 'published')?.id ??
               (isLeader ? rows.find((row) => row.status === 'draft')?.id : undefined) ??
               null
@@ -147,14 +241,7 @@ export default function WeeklyLineup() {
             .maybeSingle()
           if (detailError) throw detailError
           if (active && data) {
-            setLineup({
-              id: data.id,
-              service_date: data.service_date,
-              title: data.service_title ?? 'Worship Service',
-              status: data.status,
-              version: data.version,
-              songs: [...(data.lineup_items ?? [])].sort((a, b) => a.position - b.position) as LineupSong[],
-            })
+            await loadLineup(defaultId)
           } else if (active) {
             setLineup(null)
           }
@@ -173,7 +260,7 @@ export default function WeeklyLineup() {
     return () => {
       active = false
     }
-  }, [user?.id, teamId, routeLineupId, isLeader])
+  }, [user?.id, teamId, requestedLineupId, isLeader, loadLineup])
 
   const selectedSong = catalogSongs.find((song) => song.id === selectedSongId)
 
@@ -228,6 +315,7 @@ export default function WeeklyLineup() {
 
   async function createRevision() {
     if (!lineup || !teamId || !user?.id || !isLeader) return
+    if (!window.confirm('Create a replacement draft? The currently published lineup will remain unchanged until this replacement is published.')) return
     setSaving(true)
     setError(null)
     try {
@@ -289,6 +377,10 @@ export default function WeeklyLineup() {
   async function saveLineupItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!lineup || !teamId || !isLeader || lineup.status !== 'draft') return
+    if (!editingItemId && lineup.songs.some((item) => item.song_id === selectedSongId)) {
+      setError('This song is already in the lineup.')
+      return
+    }
     const bpm = tempoOverride.trim() ? Number(tempoOverride) : null
     if (bpm !== null && (!Number.isInteger(bpm) || bpm <= 0)) {
       setError('Tempo must be a positive whole number.')
@@ -330,6 +422,110 @@ export default function WeeklyLineup() {
     } finally {
       setSaving(false)
     }
+  }
+
+  async function recordLineupChange(action: string, details: Record<string, unknown>) {
+    if (!lineup || !teamId || !user?.id) return
+    await supa.from('lineup_change_history').insert({
+      team_id: teamId,
+      lineup_id: lineup.id,
+      changed_by: user.id,
+      action,
+      details,
+    })
+  }
+
+  async function addSelectedSongs() {
+    if (!lineup || !teamId || !isLeader || lineup.status !== 'draft' || !selectedBatchSongIds.length) return
+    const existingIds = new Set(lineup.songs.map((item) => item.song_id))
+    const songIds = selectedBatchSongIds.filter((songId) => !existingIds.has(songId))
+    if (!songIds.length) {
+      setError('Those songs are already in this lineup.')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      const { error: insertError } = await supa.from('lineup_items').insert(
+        songIds.map((songId, index) => ({
+          team_id: teamId,
+          lineup_id: lineup.id,
+          song_id: songId,
+          position: lineup.songs.length + index + 1,
+        })),
+      )
+      if (insertError) throw insertError
+      await recordLineupChange('songs_added', { song_ids: songIds })
+      await loadLineup(lineup.id)
+      setSelectedBatchSongIds([])
+      setLineupSongSearch('')
+      setNotice(`${songIds.length} song${songIds.length === 1 ? '' : 's'} added to the draft lineup.`)
+    } catch (batchError) {
+      console.error('Error adding lineup songs:', batchError)
+      setError('Unable to add the selected songs.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveAssignment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!lineup || !teamId || !isLeader) return
+    if (!assignmentItemId || !assignmentUserId || !assignmentRole.trim()) {
+      setError('Choose a song, member, and role for the assignment.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      const { error: saveError } = await supa
+        .from('lineup_assignments')
+        .upsert({
+          team_id: teamId,
+          lineup_id: lineup.id,
+          lineup_item_id: assignmentItemId,
+          user_id: assignmentUserId,
+          role_name: assignmentRole.trim(),
+          preparation_status: assignmentStatus,
+        }, { onConflict: 'lineup_item_id,user_id,role_name' })
+      if (saveError) throw saveError
+      await recordLineupChange('assignment_updated', {
+        lineup_item_id: assignmentItemId,
+        user_id: assignmentUserId,
+        role_name: assignmentRole.trim(),
+        preparation_status: assignmentStatus,
+      })
+      await loadLineup(lineup.id)
+      setAssignmentRole('')
+      setNotice('Service assignment saved.')
+    } catch (assignmentError) {
+      console.error('Error saving lineup assignment:', assignmentError)
+      setError('Unable to save the service assignment.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function updateAssignmentStatus(
+    assignment: LineupAssignment,
+    preparationStatus: LineupAssignment['preparation_status'],
+  ) {
+    if (!teamId || !lineup || (!isLeader && assignment.user_id !== user?.id)) return
+    setSaving(true)
+    setError(null)
+    const { error: updateError } = await supa
+      .from('lineup_assignments')
+      .update({ preparation_status: preparationStatus, updated_at: new Date().toISOString() })
+      .eq('id', assignment.id)
+      .eq('team_id', teamId)
+    if (updateError) {
+      setError('Unable to update preparation status.')
+      setSaving(false)
+      return
+    }
+    await loadLineup(lineup.id)
+    setSaving(false)
   }
 
   async function removeItem(item: LineupSong) {
@@ -393,7 +589,7 @@ export default function WeeklyLineup() {
   }
 
   async function publishLineup() {
-    if (!lineup || !teamId || !isLeader || lineup.status !== 'draft') return
+    if (!lineup || !teamId || !user?.id || !isLeader || lineup.status !== 'draft') return
     if (!window.confirm('Publish this lineup? Published lineups become read-only. Make a replacement draft to correct it later.')) return
     setSaving(true)
     setError(null)
@@ -412,6 +608,13 @@ export default function WeeklyLineup() {
         .maybeSingle()
       if (publishError) throw publishError
       if (!published) throw new Error('The draft was not published.')
+      await supa.from('lineup_change_history').insert({
+        team_id: teamId,
+        lineup_id: lineup.id,
+        changed_by: user.id,
+        action: 'published',
+        details: { service_date: lineup.service_date, version: lineup.version },
+      })
 
       const { error: archiveError } = await supa
         .from('lineups')
@@ -443,13 +646,15 @@ export default function WeeklyLineup() {
     }
   }
 
-  if (loading) return <div className="page-container">Loading lineup...</div>
+  if (loading) {
+    return <div className="page-container"><h2>Weekly Lineup</h2><LoadingSkeleton rows={5} label="Loading lineups" /></div>
+  }
 
   return (
     <div className="page-container">
       <h2>Weekly Lineup</h2>
-      {error && <p className="error-message" role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {error && <StatusMessage tone="error">{error}</StatusMessage>}
+      {notice && <StatusMessage tone="success">{notice}</StatusMessage>}
 
       {lineups.length > 0 && (
         <label>
@@ -494,28 +699,60 @@ export default function WeeklyLineup() {
         </form>
       )}
 
-      {!lineup && !isLeader && <p>No published lineup found for this team yet.</p>}
+      {!lineup && !isLeader && (
+        <EmptyState title="No published lineup found">
+          Your team’s published service lineups will appear here.
+        </EmptyState>
+      )}
 
       {lineup && (
         <>
           <h3>{lineup.title} — {lineup.service_date}</h3>
           <p>Status: {lineup.status} · Revision {lineup.version}</p>
-          <table className="table">
+          {lineup.songs.length === 0 ? (
+            <EmptyState title="This lineup has no songs yet">
+              {isLeader && lineup.status === 'draft'
+                ? 'Search the catalog below to add songs to this draft.'
+                : 'The service team has not added songs to this lineup.'}
+            </EmptyState>
+          ) : (
+          <div className="table-scroll" role="region" aria-label="Lineup songs" tabIndex={0}>
+          <table className="table responsive-table lineup-table">
             <thead>
-              <tr><th>#</th><th>Song</th><th>Key</th><th>Tempo</th><th>Arrangement</th>{isLeader && lineup.status === 'draft' && <th>Actions</th>}</tr>
+              <tr><th>#</th><th>Song</th><th>Key</th><th>Tempo</th><th>Arrangement</th><th>Transition</th>{isLeader && lineup.status === 'draft' && <th>Actions</th>}</tr>
             </thead>
             <tbody>
               {lineup.songs.map((item, index) => (
-                <tr key={item.id}>
+                <tr
+                  key={item.id}
+                  draggable={isLeader && lineup.status === 'draft'}
+                  onDragStart={() => setDraggedItemId(item.id)}
+                  onDragOver={(event) => {
+                    if (isLeader && lineup.status === 'draft') event.preventDefault()
+                  }}
+                  onDrop={() => {
+                    if (!draggedItemId || draggedItemId === item.id) return
+                    const draggedIndex = lineup.songs.findIndex((candidate) => candidate.id === draggedItemId)
+                    if (draggedIndex < 0) return
+                    const reordered = [...lineup.songs]
+                    const [dragged] = reordered.splice(draggedIndex, 1)
+                    if (!dragged) return
+                    reordered.splice(index, 0, dragged)
+                    setDraggedItemId(null)
+                    void reorderItems(reordered)
+                  }}
+                  onDragEnd={() => setDraggedItemId(null)}
+                >
                   <td>{index + 1}</td>
                   <td>{(Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'Unknown'}</td>
                   <td>{item.key_override ?? (Array.isArray(item.song) ? item.song[0] : item.song)?.key_signature ?? '—'}</td>
                   <td>{item.tempo_override ?? (Array.isArray(item.song) ? item.song[0] : item.song)?.tempo_bpm ?? '—'}</td>
                   <td>{(Array.isArray(item.selected_arrangement) ? item.selected_arrangement[0] : item.selected_arrangement)?.arrangement_name ?? '—'}</td>
+                  <td>{item.transition_notes || '—'}</td>
                   {isLeader && lineup.status === 'draft' && (
                     <td>
-                      <button type="button" onClick={() => void moveItem(index, -1)} disabled={index === 0}>↑</button>
-                      <button type="button" onClick={() => void moveItem(index, 1)} disabled={index === lineup.songs.length - 1}>↓</button>
+                      <button type="button" onClick={() => void moveItem(index, -1)} disabled={index === 0} aria-label={`Move ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} up`}>↑</button>
+                      <button type="button" onClick={() => void moveItem(index, 1)} disabled={index === lineup.songs.length - 1} aria-label={`Move ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} down`}>↓</button>
                       <button
                         type="button"
                         onClick={() => {
@@ -538,10 +775,168 @@ export default function WeeklyLineup() {
               ))}
             </tbody>
           </table>
+          </div>
+          )}
+
+          {(isLeader || lineupAssignments.length > 0) && (
+            <section className="card lineup-assignment-card">
+              <h3>Service assignments</h3>
+              {lineupAssignments.length > 0 ? (
+                <ul className="lineup-assignment-list">
+                  {lineupAssignments.map((assignment) => {
+                    const item = lineup.songs.find((song) => song.id === assignment.lineup_item_id)
+                    const member = teamMembers.find((candidate) => candidate.user_id === assignment.user_id)
+                    const songTitle = item
+                      ? (Array.isArray(item.song) ? item.song[0] : item.song)?.title
+                      : 'Lineup song'
+                    const canUpdate = isLeader || assignment.user_id === user?.id
+                    return (
+                      <li key={assignment.id}>
+                        <div>
+                          <strong>{member?.display_name ?? 'Team member'}</strong>
+                          <span>{assignment.role_name} · {songTitle}</span>
+                        </div>
+                        {canUpdate ? (
+                          <select
+                            value={assignment.preparation_status}
+                            onChange={(event) => void updateAssignmentStatus(
+                              assignment,
+                              event.target.value as LineupAssignment['preparation_status'],
+                            )}
+                            disabled={saving}
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="ready">Ready</option>
+                            <option value="needs_help">Needs help</option>
+                          </select>
+                        ) : (
+                          <span>{assignment.preparation_status.replace('_', ' ')}</span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p>No assignments have been added for this lineup.</p>
+              )}
+
+              {isLeader && lineup.status === 'draft' && (
+                <form className="lineup-assignment-form" onSubmit={(event) => void saveAssignment(event)}>
+                  <label>
+                    Song
+                    <select value={assignmentItemId} onChange={(event) => setAssignmentItemId(event.target.value)} required>
+                      <option value="">Choose a lineup song</option>
+                      {lineup.songs.map((item) => {
+                        const songTitle = (Array.isArray(item.song) ? item.song[0] : item.song)?.title
+                        return <option key={item.id} value={item.id}>{songTitle ?? 'Unknown song'}</option>
+                      })}
+                    </select>
+                  </label>
+                  <label>
+                    Member
+                    <select value={assignmentUserId} onChange={(event) => {
+                      setAssignmentUserId(event.target.value)
+                      const member = teamMembers.find((candidate) => candidate.user_id === event.target.value)
+                      if (!assignmentRole && member?.musical_roles.length) {
+                        setAssignmentRole(String(member.musical_roles[0]))
+                      }
+                    }} required>
+                      <option value="">Choose a member</option>
+                      {teamMembers.map((member) => (
+                        <option key={member.user_id} value={member.user_id}>
+                          {member.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Role
+                    <input
+                      value={assignmentRole}
+                      onChange={(event) => setAssignmentRole(event.target.value)}
+                      placeholder="Lead guitar"
+                      required
+                    />
+                  </label>
+                  <label>
+                    Preparation
+                    <select
+                      value={assignmentStatus}
+                      onChange={(event) => setAssignmentStatus(event.target.value as LineupAssignment['preparation_status'])}
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="ready">Ready</option>
+                      <option value="needs_help">Needs help</option>
+                    </select>
+                  </label>
+                  <button type="submit" className="btn-primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save assignment'}
+                  </button>
+                </form>
+              )}
+            </section>
+          )}
 
           {isLeader && lineup.status === 'draft' && (
-            <form className="card" onSubmit={(event) => void saveLineupItem(event)}>
-              <h3>{editingItemId ? 'Edit lineup item' : 'Add a song'}</h3>
+            <>
+              <section className="card lineup-batch-picker">
+                <h3>Add multiple songs</h3>
+                <label>
+                  Search catalog
+                  <input
+                    type="search"
+                    value={lineupSongSearch}
+                    onChange={(event) => setLineupSongSearch(event.target.value)}
+                    placeholder="Search by song, key, or arrangement"
+                  />
+                </label>
+                <div className="lineup-song-options">
+                  {catalogSongs
+                    .filter((song) =>
+                      [
+                        song.title,
+                        song.artist,
+                        song.key_signature,
+                        ...song.arrangements.map((arrangement) => arrangement.arrangement_name),
+                      ].some((value) => value?.toLocaleLowerCase().includes(lineupSongSearch.trim().toLocaleLowerCase()))
+                    )
+                    .filter((song) => !lineup.songs.some((item) => item.song_id === song.id))
+                    .map((song) => (
+                      <label className="lineup-song-option" key={song.id}>
+                        <input
+                          type="checkbox"
+                          checked={selectedBatchSongIds.includes(song.id)}
+                          onChange={(event) => setSelectedBatchSongIds((current) =>
+                            event.target.checked
+                              ? [...current, song.id]
+                              : current.filter((songId) => songId !== song.id)
+                          )}
+                        />
+                        <span>{song.title}{song.key_signature ? ` · ${song.key_signature}` : ''}</span>
+                      </label>
+                    ))}
+                  {catalogSongs
+                    .filter((song) => [
+                      song.title,
+                      song.artist,
+                      song.key_signature,
+                      ...song.arrangements.map((arrangement) => arrangement.arrangement_name),
+                    ].some((value) => value?.toLocaleLowerCase().includes(lineupSongSearch.trim().toLocaleLowerCase())))
+                    .filter((song) => !lineup.songs.some((item) => item.song_id === song.id)).length === 0 && (
+                    <p className="lineup-no-results">No available songs match this search.</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => void addSelectedSongs()}
+                  disabled={saving || selectedBatchSongIds.length === 0}
+                >
+                  {saving ? 'Adding…' : `Add selected (${selectedBatchSongIds.length})`}
+                </button>
+              </section>
+              <form className="card" onSubmit={(event) => void saveLineupItem(event)}>
+              <h3>{editingItemId ? 'Edit lineup item' : 'Add one song with details'}</h3>
               {!editingItemId && (
                 <label>
                   Song
@@ -550,7 +945,9 @@ export default function WeeklyLineup() {
                     setSelectedArrangementId('')
                   }} required>
                     <option value="">Choose a song</option>
-                    {catalogSongs.map((song) => <option key={song.id} value={song.id}>{song.title}</option>)}
+                    {catalogSongs
+                      .filter((song) => !lineup.songs.some((item) => item.song_id === song.id))
+                      .map((song) => <option key={song.id} value={song.id}>{song.title}</option>)}
                   </select>
                 </label>
               )}
@@ -584,6 +981,7 @@ export default function WeeklyLineup() {
               </button>
               {editingItemId && <button type="button" onClick={resetItemForm}>Cancel edit</button>}
             </form>
+            </>
           )}
 
           {isLeader && lineup.status === 'draft' && (
@@ -595,6 +993,20 @@ export default function WeeklyLineup() {
             <button type="button" className="btn-primary" onClick={() => void createRevision()} disabled={saving}>
               {saving ? 'Creating…' : 'Create Replacement Draft'}
             </button>
+          )}
+          {lineupHistory.length > 0 && (
+            <section className="card lineup-history">
+              <h3>Change history</h3>
+              <ul>
+                {lineupHistory.map((change) => (
+                  <li key={change.id}>
+                    <strong>{change.action.replace(/_/g, ' ')}</strong>
+                    {' · '}
+                    {new Date(change.created_at).toLocaleString()}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </>
       )}

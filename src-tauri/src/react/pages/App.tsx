@@ -12,6 +12,7 @@ import PracticeView from './PracticeView'
 import Announcements from './Announcements'
 import PracticeOverview from './PracticeOverview'
 import Settings from './Settings'
+import OfflineStatus from '../components/OfflineStatus'
 
 function AppRoutes() {
   const { user, loading, signOut } = useAuth()
@@ -49,6 +50,7 @@ function AppRoutes() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="app-header">
         <NavLink to="/" className="app-brand" aria-label="ROL Worship Team home">
           <span className="app-brand-mark" aria-hidden="true">R</span>
@@ -64,6 +66,7 @@ function AppRoutes() {
           <button onClick={signOut} className="btn-signout">Sign out</button>
         </div>
       </header>
+      <OfflineStatus />
       <div className="app-workspace">
         <aside className="app-sidebar">
           <p className="app-sidebar-label">Workspace</p>
@@ -84,7 +87,7 @@ function AppRoutes() {
             ))}
           </nav>
         </aside>
-        <main className="app-main" id="main-content">
+        <main className="app-main" id="main-content" tabIndex={-1}>
           {routes}
         </main>
       </div>

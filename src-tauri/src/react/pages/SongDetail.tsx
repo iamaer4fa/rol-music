@@ -3,7 +3,9 @@ import { Link, useParams } from 'react-router-dom'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import SongContributions from './SongContributions'
+import ChordProViewer from '../components/ChordProViewer'
 import '../App.css'
+import { readApplicationCache, saveApplicationCache } from '../lib/offline'
 
 type SongRecord = {
   id: string
@@ -42,6 +44,7 @@ export default function SongDetail() {
   const [song, setSong] = useState<SongRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -63,6 +66,15 @@ export default function SongDetail() {
         const activeTeamId = teamId ?? membership?.teamId
         if (!activeTeamId) {
           throw new Error('Your account does not have an active team membership.')
+        }
+
+        const cached = await readApplicationCache<SongRecord>(
+          activeTeamId,
+          `song:${id}`,
+        ).catch(() => null)
+        if (active && cached) {
+          setSong(cached.data)
+          setCacheUpdatedAt(cached.updatedAt)
         }
 
         const { data, error: songError } = await supa
@@ -87,12 +99,15 @@ export default function SongDetail() {
           return link.tag ? [link.tag] : []
         })
         if (active) {
-          setSong({
+          const mappedSong = {
             ...data,
             tags,
             arrangements: data.arrangements ?? [],
             media: data.media ?? [],
-          } as SongRecord)
+          } as SongRecord
+          setSong(mappedSong)
+          setCacheUpdatedAt(new Date().toISOString())
+          await saveApplicationCache(activeTeamId, `song:${id}`, mappedSong)
         }
       } catch (loadError) {
         console.error('Error loading song details:', loadError)
@@ -133,6 +148,12 @@ export default function SongDetail() {
   return (
     <div className="page-container">
       <h2>{song.title}</h2>
+      {cacheUpdatedAt && (
+        <p className="cache-status">
+          Song cached {new Date(cacheUpdatedAt).toLocaleString()}
+          {!navigator.onLine ? ' · Showing offline cache' : ''}
+        </p>
+      )}
 
       <section className="card">
         <h3>Metadata</h3>
@@ -145,19 +166,10 @@ export default function SongDetail() {
         {song.song_notes && <p><strong>Notes:</strong> {song.song_notes}</p>}
       </section>
 
-      <section className="card">
-        <h3>ChordPro Lyrics and Chords</h3>
-        <pre style={{
-          background: '#f8f9fa',
-          padding: '1rem',
-          borderRadius: 4,
-          height: '400px',
-          overflow: 'auto',
-          whiteSpace: 'pre-wrap',
-        }}>
-          {song.chordpro_lyrics || 'No lyrics available'}
-        </pre>
-      </section>
+      <ChordProViewer
+        source={song.chordpro_lyrics}
+        defaultKey={song.key_signature}
+      />
 
       {song.arrangements.length > 0 && (
         <section className="card">
@@ -222,11 +234,11 @@ export default function SongDetail() {
         />
       )}
 
-      <div style={{ marginTop: '1.5rem' }}>
+      <div className="song-detail-actions">
         <Link to={`/practice/${song.id}`} className="btn-primary">
           Open Practice Board
         </Link>
-        <Link to="/catalog" className="btn-primary" style={{ marginLeft: '0.5rem' }}>
+        <Link to="/catalog" className="btn-primary">
           Back to Catalog
         </Link>
       </div>

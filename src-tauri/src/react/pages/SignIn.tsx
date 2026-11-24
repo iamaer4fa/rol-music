@@ -14,8 +14,8 @@ export default function SignIn() {
     setError(null)
     try {
       await signIn(email, password)
-    } catch (err: any) {
-      setError(err.message || 'Sign in failed')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign in failed')
     }
   }
 
