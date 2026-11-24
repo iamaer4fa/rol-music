@@ -23,7 +23,15 @@ type Props = {
 function getErrorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const message = error.message
-    if (typeof message === 'string') return message
+    if (typeof message === 'string') {
+      if (
+        message.includes('list_unassigned_auth_users') &&
+        (message.includes('schema cache') || message.includes('Could not find the function'))
+      ) {
+        return 'Auth user discovery is not installed in this Supabase project. Apply src-tauri/src/db/20261124_unassigned_auth_users.sql in the Supabase SQL Editor, then refresh this list.'
+      }
+      return message
+    }
   }
   if (typeof error === 'string') return error
   return 'Unknown database error.'

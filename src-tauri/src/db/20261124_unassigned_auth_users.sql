@@ -40,4 +40,6 @@ REVOKE ALL ON FUNCTION public.list_unassigned_auth_users(uuid)
 GRANT EXECUTE ON FUNCTION public.list_unassigned_auth_users(uuid)
     TO authenticated;
 
+NOTIFY pgrst, 'reload schema';
+
 COMMIT;
