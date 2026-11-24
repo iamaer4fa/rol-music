@@ -232,7 +232,7 @@ export default function HomeDashboard() {
                   </Link>
                 )}
                 {upcomingService.songs[0]?.song_id && (
-                  <Link className="btn-primary" to={`/practice/${upcomingService.songs[0].song_id}`}>
+                  <Link className="btn-primary" to={`/practice-board/${upcomingService.songs[0].song_id}`}>
                     Practice next song
                   </Link>
                 )}

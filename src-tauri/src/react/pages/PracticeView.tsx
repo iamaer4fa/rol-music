@@ -565,7 +565,7 @@ export default function PracticeView() {
     return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
   }
 
-  if (loading) return <div className="page-container"><h2>Practice</h2><LoadingSkeleton rows={4} label="Loading practice board" /></div>
+  if (loading) return <div className="page-container"><h2>Practice Board</h2><LoadingSkeleton rows={4} label="Loading practice board" /></div>
   if (error && !song) return <div className="page-container"><StatusMessage tone="error">{error}</StatusMessage></div>
   if (!song) return <div className="page-container"><EmptyState title="Song not found">Return to the song catalog and select an available song.</EmptyState></div>
 
@@ -578,7 +578,7 @@ export default function PracticeView() {
 
   return (
     <div className="page-container">
-      <h2>Practice: {song.title}</h2>
+      <h2>Practice Board: {song.title}</h2>
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
 
       <section className="card">

@@ -238,7 +238,7 @@ export default function SongDetail() {
       )}
 
       <div className="song-detail-actions">
-        <Link to={`/practice/${song.id}`} className="btn-primary">
+        <Link to={`/practice-board/${song.id}`} className="btn-primary">
           Open Practice Board
         </Link>
         <Link to="/catalog" className="btn-primary">

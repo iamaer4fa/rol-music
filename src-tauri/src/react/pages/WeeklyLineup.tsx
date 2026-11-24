@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/use-auth'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
 import { getUpcomingServiceDate } from '../lib/workflow'
+import { canManageTeam } from '../lib/roles'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
@@ -63,7 +64,7 @@ export default function WeeklyLineup() {
   const [searchParams] = useSearchParams()
   const queryLineupId = searchParams.get('lineupId')
   const requestedLineupId = routeLineupId ?? queryLineupId
-  const isLeader = accessRole === 'worship_leader'
+  const isLeader = canManageTeam(accessRole)
   const [lineups, setLineups] = useState<Array<{ id: string; service_date: string; service_title: string | null; status: Lineup['status'] }>>([])
   const [selectedId, setSelectedId] = useState<string | null>(requestedLineupId)
   const [lineup, setLineup] = useState<Lineup | null>(null)

@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom'
 import { useAuth } from '../hooks/use-auth'
+import { canViewPracticeReports } from '../lib/roles'
 import '../App.css'
 
 // Page components
@@ -16,8 +17,15 @@ import OfflineStatus from '../components/OfflineStatus'
 import NoTeamAccess from '../components/NoTeamAccess'
 
 function AppRoutes() {
-  const { user, loading, signOut, teamId, teamMembershipLoading, teamMembershipError } = useAuth()
-  const { pathname } = useLocation()
+  const {
+    user,
+    loading,
+    signOut,
+    teamId,
+    accessRole,
+    teamMembershipLoading,
+    teamMembershipError,
+  } = useAuth()
 
   if (loading) {
     return <div className="app-loading">Loading your workspace...</div>
@@ -36,7 +44,7 @@ function AppRoutes() {
         <Route path="/catalog" element={user ? <SongCatalog /> : <Navigate to="/signin" replace />} />
         <Route path="/song/:id" element={user ? <SongDetail /> : <Navigate to="/signin" replace />} />
         <Route path="/lineup" element={user ? <WeeklyLineup /> : <Navigate to="/signin" replace />} />
-        <Route path="/practice/:songId" element={user ? <PracticeView /> : <Navigate to="/signin" replace />} />
+        <Route path="/practice-board/:songId" element={user ? <PracticeView /> : <Navigate to="/signin" replace />} />
         <Route path="/announcements" element={user ? <Announcements /> : <Navigate to="/signin" replace />} />
         <Route path="/overview" element={user ? <PracticeOverview /> : <Navigate to="/signin" replace />} />
         <Route path="/settings" element={user ? <Settings /> : <Navigate to="/signin" replace />} />
@@ -51,7 +59,9 @@ function AppRoutes() {
     { to: '/catalog', label: 'Songs' },
     { to: '/lineup', label: 'Lineup' },
     { to: '/announcements', label: 'Updates' },
-    { to: '/overview', label: 'Practice' },
+    ...(canViewPracticeReports(accessRole)
+      ? [{ to: '/overview', label: 'Practice Reports' }]
+      : []),
     { to: '/settings', label: 'Settings' },
   ]
 
@@ -83,11 +93,7 @@ function AppRoutes() {
                 key={to}
                 to={to}
                 end={end ?? false}
-                className={({ isActive }) =>
-                  isActive || (to === '/overview' && pathname.startsWith('/practice/'))
-                    ? 'app-nav-link active'
-                    : 'app-nav-link'
-                }
+                className={({ isActive }) => isActive ? 'app-nav-link active' : 'app-nav-link'}
               >
                 {label}
               </NavLink>

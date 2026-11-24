@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/use-auth'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
 import TeamMemberManagement from '../components/TeamMemberManagement'
+import { canManageTeam } from '../lib/roles'
 import '../App.css'
 
 const weekdays = [
@@ -25,7 +26,7 @@ export default function Settings() {
     practiceSharingEnabled,
     setPracticeSharingEnabled,
   } = useAuth()
-  const isLeader = accessRole === 'worship_leader'
+  const isLeader = canManageTeam(accessRole)
   const [displayName, setDisplayName] = useState('')
   const [preferredInstrument, setPreferredInstrument] = useState('')
   const [ianaTimezone, setIanaTimezone] = useState('Asia/Manila')
@@ -308,7 +309,9 @@ export default function Settings() {
         <p>Application role: {accessRole ?? 'Not assigned'}</p>
         <p>Team ID: {teamId ?? 'Not assigned'}</p>
       </section>
-      {isLeader && teamId && <TeamMemberManagement teamId={teamId} />}
+      {isLeader && teamId && (
+        <TeamMemberManagement teamId={teamId} canAssignAdmin={accessRole === 'admin'} />
+      )}
     </div>
   )
 }

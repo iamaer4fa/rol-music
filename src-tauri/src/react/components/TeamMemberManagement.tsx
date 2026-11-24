@@ -4,7 +4,7 @@ import StatusMessage from './StatusMessage'
 
 type TeamMember = {
   user_id: string
-  access_role: 'worship_leader' | 'worship_team_director' | 'member'
+  access_role: 'admin' | 'worship_leader' | 'worship_team_director' | 'member'
   membership_status: 'active' | 'inactive' | 'invited'
   display_name: string | null
 }
@@ -18,6 +18,7 @@ type UnassignedAuthUser = {
 
 type Props = {
   teamId: string
+  canAssignAdmin?: boolean
 }
 
 function getErrorMessage(error: unknown): string {
@@ -37,11 +38,11 @@ function getErrorMessage(error: unknown): string {
   return 'Unknown database error.'
 }
 
-export default function TeamMemberManagement({ teamId }: Props) {
+export default function TeamMemberManagement({ teamId, canAssignAdmin = false }: Props) {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [unassignedUsers, setUnassignedUsers] = useState<UnassignedAuthUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
-  const [role, setRole] = useState<'member' | 'worship_team_director'>('member')
+  const [role, setRole] = useState<'admin' | 'member' | 'worship_team_director'>('member')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -157,6 +158,7 @@ export default function TeamMemberManagement({ teamId }: Props) {
           <select value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
             <option value="member">Member</option>
             <option value="worship_team_director">Worship Team Director</option>
+            {canAssignAdmin && <option value="admin">Admin</option>}
           </select>
         </label>
         <button type="submit" className="btn-primary" disabled={saving}>

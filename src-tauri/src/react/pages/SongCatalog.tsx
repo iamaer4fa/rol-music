@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { classifyMediaUrl } from '../lib/media'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
 import type { SongRecord } from '../lib/models'
+import { canManageTeam } from '../lib/roles'
 import { filterCatalogSongs, sortCatalogSongs, type CatalogSortDirection, type CatalogSortField } from '../lib/catalog'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
@@ -43,7 +44,7 @@ export default function SongCatalog() {
   const [audioUrl, setAudioUrl] = useState('')
   const [audioDescription, setAudioDescription] = useState('')
   const [cacheUpdatedAt, setCacheUpdatedAt] = useState<string | null>(null)
-  const isLeader = accessRole === 'worship_leader'
+  const isLeader = canManageTeam(accessRole)
 
   useEffect(() => {
     if (!user?.id) {

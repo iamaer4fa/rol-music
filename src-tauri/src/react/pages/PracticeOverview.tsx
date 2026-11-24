@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/use-auth'
 import '../App.css'
 import type { PracticeSessionRecord, MemberPracticeSummary, SongPracticeSummary } from '../lib/models'
 import { escapeCsv, getWeekdayName, getWeekEndDate, getWeekStartDate } from '../lib/reporting'
+import { canViewPracticeReports } from '../lib/roles'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
@@ -16,7 +17,7 @@ export default function PracticeOverview() {
   } = useAuth()
 
   // Check if user is authorized (Worship Leader or Worship Team Director)
-  const isAuthorized = accessRole === 'worship_leader' || accessRole === 'worship_team_director'
+  const isAuthorized = canViewPracticeReports(accessRole)
 
   const [teamPracticeTotal, setTeamPracticeTotal] = useState(0)
   const [memberPracticeSummaries, setMemberPracticeSummaries] = useState<MemberPracticeSummary[]>([])
