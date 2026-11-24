@@ -3,6 +3,7 @@ import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
+import { getUpcomingServiceDate } from '../lib/workflow'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
@@ -75,6 +76,7 @@ export default function WeeklyLineup() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [serviceDate, setServiceDate] = useState(new Date().toISOString().slice(0, 10))
   const [serviceTitle, setServiceTitle] = useState('Sunday Worship')
+  const [showNewLineupForm, setShowNewLineupForm] = useState(false)
   const [lineupSongSearch, setLineupSongSearch] = useState('')
   const [selectedBatchSongIds, setSelectedBatchSongIds] = useState<string[]>([])
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
@@ -89,6 +91,12 @@ export default function WeeklyLineup() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [noticeTone, setNoticeTone] = useState<'success' | 'warning'>('success')
+
+  function showNotice(message: string, tone: 'success' | 'warning' = 'success') {
+    setNoticeTone(tone)
+    setNotice(message)
+  }
 
   const loadLineup = useCallback(async (id: string) => {
     if (!teamId) return
@@ -177,7 +185,13 @@ export default function WeeklyLineup() {
       const cached = await readApplicationCache<Array<{ id: string; service_date: string; service_title: string | null; status: Lineup['status'] }>>(activeTeamId, 'lineups').catch(() => null)
       if (cached && active) setLineups(cached.data)
       try {
-        const [{ data: lineupRows, error: lineupError }, { data: songs, error: songsError }, { data: memberRows, error: membersError }, { data: profileRows, error: profilesError }] =
+        const [
+          { data: lineupRows, error: lineupError },
+          { data: songs, error: songsError },
+          { data: memberRows, error: membersError },
+          { data: profileRows, error: profilesError },
+          { data: teamSettings, error: settingsError },
+        ] =
           await Promise.all([
             supa
               .from('lineups')
@@ -200,12 +214,31 @@ export default function WeeklyLineup() {
             supa
               .from('profiles')
               .select('id, display_name'),
+            supa
+              .from('team_settings')
+              .select('iana_timezone, service_day_of_week, service_cutoff_time')
+              .eq('team_id', activeTeamId)
+              .maybeSingle(),
           ])
         if (lineupError) throw lineupError
         if (songsError) throw songsError
         if (membersError) throw membersError
         if (profilesError) throw profilesError
+        if (settingsError) throw settingsError
         if (!active) return
+
+        const nextServiceDate = getUpcomingServiceDate(
+          new Date(),
+          teamSettings?.iana_timezone ?? 'Asia/Manila',
+          teamSettings?.service_day_of_week ?? 7,
+          teamSettings?.service_cutoff_time ?? '09:00:00',
+        )
+        setServiceDate(nextServiceDate)
+        const serviceDayName = new Date(`${nextServiceDate}T00:00:00Z`).toLocaleDateString('en-US', {
+          weekday: 'long',
+          timeZone: 'UTC',
+        })
+        setServiceTitle(`${serviceDayName} Worship`)
 
         const rows = lineupRows ?? []
         setLineups(rows)
@@ -263,6 +296,15 @@ export default function WeeklyLineup() {
   }, [user?.id, teamId, requestedLineupId, isLeader, loadLineup])
 
   const selectedSong = catalogSongs.find((song) => song.id === selectedSongId)
+  const availableLineupSongs = catalogSongs.filter((song) =>
+    !lineup?.songs.some((item) => item.song_id === song.id)
+  )
+  const matchingLineupSongs = availableLineupSongs.filter((song) => [
+    song.title,
+    song.artist,
+    song.key_signature,
+    ...song.arrangements.map((arrangement) => arrangement.arrangement_name),
+  ].some((value) => value?.toLocaleLowerCase().includes(lineupSongSearch.trim().toLocaleLowerCase())))
 
   function resetItemForm() {
     setEditingItemId(null)
@@ -271,6 +313,35 @@ export default function WeeklyLineup() {
     setKeyOverride('')
     setTempoOverride('')
     setTransitionNotes('')
+  }
+
+  async function startNewLineup() {
+    if (!teamId || !isLeader) return
+    setError(null)
+    try {
+      const { data: settings, error: settingsError } = await supa
+        .from('team_settings')
+        .select('iana_timezone, service_day_of_week, service_cutoff_time')
+        .eq('team_id', teamId)
+        .maybeSingle()
+      if (settingsError) throw settingsError
+      const nextDate = getUpcomingServiceDate(
+        new Date(),
+        settings?.iana_timezone ?? 'Asia/Manila',
+        settings?.service_day_of_week ?? 7,
+        settings?.service_cutoff_time ?? '09:00:00',
+      )
+      setServiceDate(nextDate)
+      const serviceDayName = new Date(`${nextDate}T00:00:00Z`).toLocaleDateString('en-US', {
+        weekday: 'long',
+        timeZone: 'UTC',
+      })
+      setServiceTitle(`${serviceDayName} Worship`)
+      setShowNewLineupForm(true)
+    } catch (startError) {
+      console.error('Unable to prepare a new service lineup:', startError)
+      setError('Unable to determine the next service date. Check the team calendar settings.')
+    }
   }
 
   async function createDraft(event: FormEvent<HTMLFormElement>) {
@@ -304,7 +375,8 @@ export default function WeeklyLineup() {
         version: data.version,
         songs: [],
       })
-      setNotice('Draft lineup created.')
+      setShowNewLineupForm(false)
+      showNotice('Draft lineup created.')
     } catch (createError) {
       console.error('Error creating draft lineup:', createError)
       setError('Unable to create draft lineup. Check leader permissions and try again.')
@@ -365,7 +437,7 @@ export default function WeeklyLineup() {
         { id: data.id, service_date: data.service_date, service_title: data.service_title, status: data.status },
         ...current,
       ])
-      setNotice('Revision draft created. The published lineup remains unchanged.')
+      showNotice('Revision draft created. The published lineup remains unchanged.')
     } catch (createError) {
       console.error('Error creating lineup revision:', createError)
       setError('Unable to create the replacement draft. The previous published lineup is unchanged.')
@@ -415,7 +487,7 @@ export default function WeeklyLineup() {
       if (!result.data) throw new Error('The lineup item was not saved.')
       await loadLineup(lineup.id)
       resetItemForm()
-      setNotice(editingItemId ? 'Lineup item updated.' : 'Song added to draft lineup.')
+      showNotice(editingItemId ? 'Lineup item updated.' : 'Song added to draft lineup.')
     } catch (saveError) {
       console.error('Error saving lineup item:', saveError)
       setError('Unable to save the lineup item.')
@@ -460,7 +532,7 @@ export default function WeeklyLineup() {
       await loadLineup(lineup.id)
       setSelectedBatchSongIds([])
       setLineupSongSearch('')
-      setNotice(`${songIds.length} song${songIds.length === 1 ? '' : 's'} added to the draft lineup.`)
+      showNotice(`${songIds.length} song${songIds.length === 1 ? '' : 's'} added to the draft lineup.`)
     } catch (batchError) {
       console.error('Error adding lineup songs:', batchError)
       setError('Unable to add the selected songs.')
@@ -498,7 +570,7 @@ export default function WeeklyLineup() {
       })
       await loadLineup(lineup.id)
       setAssignmentRole('')
-      setNotice('Service assignment saved.')
+      showNotice('Service assignment saved.')
     } catch (assignmentError) {
       console.error('Error saving lineup assignment:', assignmentError)
       setError('Unable to save the service assignment.')
@@ -634,9 +706,9 @@ export default function WeeklyLineup() {
       ))
       if (archiveError) {
         console.error('Unable to archive the previous published lineup:', archiveError)
-        setNotice('Lineup published, but the prior published lineup could not be archived.')
+        showNotice('Lineup published, but the prior published lineup could not be archived.', 'warning')
       } else {
-        setNotice('Lineup published. Published items are read-only; use a replacement draft for corrections.')
+        showNotice('Lineup published. Published items are read-only; use a replacement draft for corrections.')
       }
     } catch (publishError) {
       console.error('Error publishing lineup:', publishError)
@@ -654,7 +726,7 @@ export default function WeeklyLineup() {
     <div className="page-container">
       <h2>Weekly Lineup</h2>
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
-      {notice && <StatusMessage tone="success">{notice}</StatusMessage>}
+      {notice && <StatusMessage tone={noticeTone}>{notice}</StatusMessage>}
 
       {lineups.length > 0 && (
         <label>
@@ -682,9 +754,21 @@ export default function WeeklyLineup() {
         </label>
       )}
 
-      {isLeader && !lineup && (
+      {isLeader && lineup && !showNewLineupForm && (
+        <button
+          type="button"
+          className="btn-primary lineup-create-new"
+          onClick={() => void startNewLineup()}
+          disabled={saving}
+        >
+          Create a New Lineup
+        </button>
+      )}
+
+      {isLeader && (showNewLineupForm || !lineup) && (
         <form className="card" onSubmit={(event) => void createDraft(event)}>
-          <h3>Create draft lineup</h3>
+          <h3>Create a New Lineup</h3>
+          <p>The service date defaults to your team’s next scheduled service.</p>
           <label>
             Service date
             <input type="date" value={serviceDate} onChange={(event) => setServiceDate(event.target.value)} required />
@@ -696,6 +780,11 @@ export default function WeeklyLineup() {
           <button type="submit" className="btn-primary" disabled={saving}>
             {saving ? 'Creating…' : 'Create Draft'}
           </button>
+          {lineup && (
+            <button type="button" className="btn-secondary" onClick={() => setShowNewLineupForm(false)}>
+              Cancel
+            </button>
+          )}
         </form>
       )}
 
@@ -705,7 +794,7 @@ export default function WeeklyLineup() {
         </EmptyState>
       )}
 
-      {lineup && (
+      {lineup && !showNewLineupForm && (
         <>
           <h3>{lineup.title} — {lineup.service_date}</h3>
           <p>Status: {lineup.status} · Revision {lineup.version}</p>
@@ -755,6 +844,7 @@ export default function WeeklyLineup() {
                       <button type="button" onClick={() => void moveItem(index, 1)} disabled={index === lineup.songs.length - 1} aria-label={`Move ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} down`}>↓</button>
                       <button
                         type="button"
+                        aria-label={`Edit ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')}`}
                         onClick={() => {
                           const song = catalogSongs.find((candidate) => candidate.id === item.song_id)
                           setEditingItemId(item.id)
@@ -768,7 +858,13 @@ export default function WeeklyLineup() {
                       >
                         Edit
                       </button>
-                      <button type="button" onClick={() => void removeItem(item)}>Remove</button>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} from lineup`}
+                        onClick={() => void removeItem(item)}
+                      >
+                        Remove
+                      </button>
                     </td>
                   )}
                 </tr>
@@ -891,20 +987,11 @@ export default function WeeklyLineup() {
                   />
                 </label>
                 <div className="lineup-song-options">
-                  {catalogSongs
-                    .filter((song) =>
-                      [
-                        song.title,
-                        song.artist,
-                        song.key_signature,
-                        ...song.arrangements.map((arrangement) => arrangement.arrangement_name),
-                      ].some((value) => value?.toLocaleLowerCase().includes(lineupSongSearch.trim().toLocaleLowerCase()))
-                    )
-                    .filter((song) => !lineup.songs.some((item) => item.song_id === song.id))
-                    .map((song) => (
+                  {matchingLineupSongs.map((song) => (
                       <label className="lineup-song-option" key={song.id}>
                         <input
                           type="checkbox"
+                          aria-label={`Add ${song.title} to lineup`}
                           checked={selectedBatchSongIds.includes(song.id)}
                           onChange={(event) => setSelectedBatchSongIds((current) =>
                             event.target.checked
@@ -915,14 +1002,7 @@ export default function WeeklyLineup() {
                         <span>{song.title}{song.key_signature ? ` · ${song.key_signature}` : ''}</span>
                       </label>
                     ))}
-                  {catalogSongs
-                    .filter((song) => [
-                      song.title,
-                      song.artist,
-                      song.key_signature,
-                      ...song.arrangements.map((arrangement) => arrangement.arrangement_name),
-                    ].some((value) => value?.toLocaleLowerCase().includes(lineupSongSearch.trim().toLocaleLowerCase())))
-                    .filter((song) => !lineup.songs.some((item) => item.song_id === song.id)).length === 0 && (
+                  {matchingLineupSongs.length === 0 && (
                     <p className="lineup-no-results">No available songs match this search.</p>
                   )}
                 </div>

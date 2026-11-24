@@ -11,6 +11,8 @@ export type UserContextType = {
   user: import('@supabase/supabase-js').User | null
   session: import('@supabase/supabase-js').Session | null
   loading: boolean
+  teamMembershipLoading: boolean
+  teamMembershipError: string | null
   teamId: string | null
   accessRole: string | null
   musicalRoles: string[]
@@ -26,40 +28,62 @@ export function useAuth(): UserContextType {
   const [user, setUser] = useState<import('@supabase/supabase-js').User | null>(null)
   const [session, setSession] = useState<import('@supabase/supabase-js').Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [teamMembershipLoading, setTeamMembershipLoading] = useState(true)
+  const [teamMembershipError, setTeamMembershipError] = useState<string | null>(null)
   const [practiceSharingEnabled, setPracticeSharingEnabledState] = useState(false)
   const [teamId, setTeamId] = useState<string | null>(null)
   const [accessRole, setAccessRole] = useState<string | null>(null)
   const [musicalRoles, setMusicalRoles] = useState<string[]>([])
 
   const fetchTeamMembership = useCallback(async () => {
-    if (!user?.id) return null
+    if (!user?.id) {
+      setTeamId(null)
+      setAccessRole(null)
+      setMusicalRoles([])
+      setPracticeSharingEnabledState(false)
+      setTeamMembershipLoading(false)
+      return null
+    }
 
+    setTeamMembershipLoading(true)
+    setTeamMembershipError(null)
     try {
       const { data, error } = await supa
         .from('team_members')
         .select('access_role, musical_roles, team_id, practice_sharing_enabled')
         .eq('user_id', user.id)
-        .single()
+        .maybeSingle()
 
       if (error) {
-        console.error('Error fetching team membership:', error)
+        throw error
+      }
+
+      if (!data) {
+        setTeamId(null)
+        setAccessRole(null)
+        setMusicalRoles([])
+        setPracticeSharingEnabledState(false)
+        localStorage.removeItem('team_id')
+        localStorage.removeItem('access_role')
+        localStorage.removeItem('musical_roles')
         return null
       }
 
-      if (data) {
-        setTeamId(data.team_id)
-        setAccessRole(data.access_role)
-        setMusicalRoles(data.musical_roles || [])
-        setPracticeSharingEnabledState(data.practice_sharing_enabled === true)
-        localStorage.setItem('team_id', data.team_id)
-        localStorage.setItem('access_role', data.access_role)
-        localStorage.setItem('musical_roles', JSON.stringify(data.musical_roles || []))
-        return { teamId: data.team_id, role: data.access_role }
-      }
+      setTeamId(data.team_id)
+      setAccessRole(data.access_role)
+      setMusicalRoles(data.musical_roles || [])
+      setPracticeSharingEnabledState(data.practice_sharing_enabled === true)
+      localStorage.setItem('team_id', data.team_id)
+      localStorage.setItem('access_role', data.access_role)
+      localStorage.setItem('musical_roles', JSON.stringify(data.musical_roles || []))
+      return { teamId: data.team_id, role: data.access_role }
     } catch (err) {
-      console.error('Exception fetching team membership:', err)
+      console.error('Unable to verify team membership:', err)
+      setTeamMembershipError('Unable to verify your team access. Check your connection and try again.')
+      return null
+    } finally {
+      setTeamMembershipLoading(false)
     }
-    return null
   }, [user?.id])
 
   useEffect(() => {
@@ -94,6 +118,8 @@ export function useAuth(): UserContextType {
       setAccessRole(null)
       setMusicalRoles([])
       setPracticeSharingEnabledState(false)
+      setTeamMembershipLoading(false)
+      setTeamMembershipError(null)
       return
     }
     void fetchTeamMembership()
@@ -228,6 +254,8 @@ export function useAuth(): UserContextType {
     user,
     session,
     loading,
+    teamMembershipLoading,
+    teamMembershipError,
     teamId,
     accessRole,
     musicalRoles,

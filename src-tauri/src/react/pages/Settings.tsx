@@ -3,6 +3,7 @@ import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
+import TeamMemberManagement from '../components/TeamMemberManagement'
 import '../App.css'
 
 const weekdays = [
@@ -307,6 +308,7 @@ export default function Settings() {
         <p>Application role: {accessRole ?? 'Not assigned'}</p>
         <p>Team ID: {teamId ?? 'Not assigned'}</p>
       </section>
+      {isLeader && teamId && <TeamMemberManagement teamId={teamId} />}
     </div>
   )
 }

@@ -761,7 +761,7 @@ export default function PracticeView() {
 
       <section className="card">
         <h3>Practice Privacy</h3>
-        <label>
+        <label className="checkbox-row">
           <input
             type="checkbox"
             checked={practiceSharingEnabled}

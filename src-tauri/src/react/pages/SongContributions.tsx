@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { supa } from '../lib/supabase'
 import { classifyMediaUrl, type MediaKind } from '../lib/media'
+import StatusMessage from '../components/StatusMessage'
 
 const AUDIO_BUCKET = 'team-audio'
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024
@@ -262,7 +263,7 @@ export default function SongContributions({
         </label>
         <button type="submit" disabled={mediaSaving}>{mediaSaving ? 'Uploading…' : 'Upload audio'}</button>
       </form>
-      {mediaError && <p className="error-message" role="alert">{mediaError}</p>}
+      {mediaError && <StatusMessage tone="error">{mediaError}</StatusMessage>}
 
       <form onSubmit={(event) => void addArrangement(event)}>
         <h4>Add an arrangement or key</h4>
@@ -298,7 +299,7 @@ export default function SongContributions({
         </label>
         <button type="submit" disabled={arrangementSaving}>{arrangementSaving ? 'Saving…' : 'Add arrangement'}</button>
       </form>
-      {arrangementError && <p className="error-message" role="alert">{arrangementError}</p>}
+      {arrangementError && <StatusMessage tone="error">{arrangementError}</StatusMessage>}
     </section>
   )
 }

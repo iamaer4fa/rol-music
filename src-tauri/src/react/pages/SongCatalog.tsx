@@ -5,12 +5,11 @@ import { useNavigate } from 'react-router-dom'
 import { classifyMediaUrl } from '../lib/media'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
 import type { SongRecord } from '../lib/models'
+import { filterCatalogSongs, sortCatalogSongs, type CatalogSortDirection, type CatalogSortField } from '../lib/catalog'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
 import '../App.css'
-
-type SortField = 'title' | 'artist' | 'key' | 'tempo'
 
 export default function SongCatalog() {
   const { user, teamId, accessRole } = useAuth()
@@ -19,8 +18,8 @@ export default function SongCatalog() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [sortField, setSortField] = useState<SortField>('title')
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [sortField, setSortField] = useState<CatalogSortField>('title')
+  const [sortDirection, setSortDirection] = useState<CatalogSortDirection>('asc')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -74,7 +73,7 @@ export default function SongCatalog() {
         setCacheUpdatedAt(cached.updatedAt)
       }
       try {
-        let query = supa
+        const query = supa
           .from('songs')
           .select('*, tag_links:songs_tags(tag:song_tags(id, tag_name)), arrangements:song_arrangements(id, arrangement_name, key, capo_position, tempo_override, performance_notes)')
           .eq('team_id', activeTeamId)
@@ -92,7 +91,12 @@ export default function SongCatalog() {
           }))
           setSongs(mappedSongs)
           setCacheUpdatedAt(new Date().toISOString())
-          await saveApplicationCache(activeTeamId, 'songs:all', mappedSongs)
+          try {
+            await saveApplicationCache(activeTeamId, 'songs:all', mappedSongs)
+          } catch (cacheError) {
+            console.error('Unable to update the song catalog cache:', cacheError)
+            setLoadError('Catalog loaded, but the offline copy could not be updated.')
+          }
         }
       } catch (err) {
         console.error('Error loading songs:', err)
@@ -115,40 +119,14 @@ export default function SongCatalog() {
     }
   }, [user?.id, teamId])
 
-  const filteredSongs = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    return songs.filter((song) => {
-      const matchesQuery = !query ||
-        [song.title, song.artist, ...(song.arrangements ?? []).flatMap((arrangement) => [
-          arrangement.arrangement_name,
-          arrangement.key,
-          arrangement.performance_notes,
-        ])].some((value) => value?.toLowerCase().includes(query))
-      const matchesTag = !selectedTag ||
-        (song.tags ?? []).some((tag: { tag_name: string }) => tag.tag_name === selectedTag)
-      const matchesKey = !selectedKey || song.key_signature === selectedKey
-      return matchesQuery && matchesTag && matchesKey
-    })
-  }, [searchQuery, selectedKey, selectedTag, songs])
-
-  const sortedSongs = useMemo(() => {
-    const valueFor = (song: SongRecord) => {
-      switch (sortField) {
-        case 'artist': return song.artist ?? ''
-        case 'key': return song.key_signature ?? ''
-        case 'tempo': return song.tempo_bpm ?? 0
-        default: return song.title
-      }
-    }
-    return [...filteredSongs].sort((left, right) => {
-      const leftValue = valueFor(left)
-      const rightValue = valueFor(right)
-      const compared = typeof leftValue === 'number' && typeof rightValue === 'number'
-        ? leftValue - rightValue
-        : String(leftValue).localeCompare(String(rightValue), undefined, { sensitivity: 'base' })
-      return sortDirection === 'asc' ? compared : -compared
-    })
-  }, [filteredSongs, sortDirection, sortField])
+  const sortedSongs = useMemo(
+    () => sortCatalogSongs(
+      filterCatalogSongs(songs, { query: searchQuery, tag: selectedTag, key: selectedKey }),
+      sortField,
+      sortDirection,
+    ),
+    [searchQuery, selectedKey, selectedTag, sortDirection, sortField, songs],
+  )
 
   async function createSong(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -473,7 +451,7 @@ export default function SongCatalog() {
           </label>
           <label>
             Sort by
-            <select value={sortField} onChange={(event) => setSortField(event.target.value as SortField)}>
+            <select value={sortField} onChange={(event) => setSortField(event.target.value as CatalogSortField)}>
               <option value="title">Title</option>
               <option value="artist">Artist</option>
               <option value="key">Key</option>
@@ -484,7 +462,7 @@ export default function SongCatalog() {
             Sort direction
             <select
               value={sortDirection}
-              onChange={(event) => setSortDirection(event.target.value as 'asc' | 'desc')}
+              onChange={(event) => setSortDirection(event.target.value as CatalogSortDirection)}
             >
               <option value="asc">Ascending</option>
               <option value="desc">Descending</option>

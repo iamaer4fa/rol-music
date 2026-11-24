@@ -210,7 +210,13 @@ export default function PracticeOverview() {
   }, [user?.id, teamId, selectedMember, selectedSong, selectedWeek, isAuthorized])
 
   if (!isAuthorized && user?.id) {
-    return <div className="alert alert-error">Access denied. This view is for Worship Leaders and Worship Team Directors only.</div>
+    return (
+      <div className="page-container">
+        <StatusMessage tone="error">
+          Access denied. This view is for Worship Leaders and Worship Team Directors only.
+        </StatusMessage>
+      </div>
+    )
   }
 
   if (loadingState) {
@@ -248,7 +254,6 @@ export default function PracticeOverview() {
   return (
     <div className="page-container">
       <h2>Practice Overview</h2>
-      {error && <StatusMessage tone="error">{error}</StatusMessage>}
       
       {isAuthorized ? (
         <>

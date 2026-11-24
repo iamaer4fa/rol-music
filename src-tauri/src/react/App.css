@@ -346,7 +346,8 @@ h3 {
   font-size: 0.78rem;
 }
 
-.settings-checkbox-row {
+.settings-checkbox-row,
+.checkbox-row {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -358,7 +359,8 @@ h3 {
   cursor: pointer;
 }
 
-.settings-checkbox-row input[type="checkbox"] {
+.settings-checkbox-row input[type="checkbox"],
+.checkbox-row input[type="checkbox"] {
   width: 18px;
   height: 18px;
   min-height: 18px;
@@ -816,6 +818,10 @@ h3 {
   box-shadow: var(--shadow-card);
 }
 
+.page-container .song-list-item:last-child {
+  border-bottom: 1px solid var(--border-color);
+}
+
 .song-list-summary {
   display: grid;
   align-content: center;
@@ -1119,6 +1125,75 @@ tbody tr:hover td {
   font-size: 0.78rem;
 }
 
+.team-member-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.team-member-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team-member-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.team-member-list li > span:first-child {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.team-member-list small {
+  color: var(--muted-text);
+  overflow-wrap: anywhere;
+}
+
+.team-member-list li > span:last-child {
+  align-self: center;
+  color: var(--muted-text);
+  font-size: 0.82rem;
+  text-transform: capitalize;
+}
+
+.no-team-access {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.no-team-access > .card {
+  width: min(100%, 620px);
+}
+
+.no-team-access small {
+  display: block;
+  margin-top: 1rem;
+  color: var(--muted-text);
+}
+
+.no-team-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.lineup-create-new {
+  margin-top: 1rem;
+}
+
 .offline-status {
   position: sticky;
   z-index: 4;
@@ -1130,6 +1205,86 @@ tbody tr:hover td {
   text-align: center;
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.no-team-access {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 1.5rem;
+  background: var(--background-color);
+}
+
+.no-team-access > .card {
+  width: min(100%, 620px);
+}
+
+.no-team-access h1 {
+  font-size: 1.5rem;
+}
+
+.no-team-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.team-member-management > p,
+.team-member-management > small {
+  color: var(--muted-text);
+}
+
+.team-member-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.team-member-heading h3 {
+  margin-bottom: 0;
+}
+
+.team-member-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.team-member-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.team-member-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border-color);
+  text-transform: capitalize;
+}
+
+.team-member-list li > span:first-child {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.team-member-list small {
+  color: var(--muted-text);
+  font-size: 0.72rem;
+  text-transform: none;
+}
+
+.lineup-create-new {
+  margin: 0 0 1rem;
 }
 
 .app-loading {
@@ -1151,6 +1306,15 @@ tbody tr:hover td {
 }
 
 @media (max-width: 860px) {
+  .team-member-form {
+    grid-template-columns: 1fr;
+  }
+
+  .team-member-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .dashboard-service-heading,
   .chordpro-toolbar {
     align-items: flex-start;

@@ -13,13 +13,20 @@ import Announcements from './Announcements'
 import PracticeOverview from './PracticeOverview'
 import Settings from './Settings'
 import OfflineStatus from '../components/OfflineStatus'
+import NoTeamAccess from '../components/NoTeamAccess'
 
 function AppRoutes() {
-  const { user, loading, signOut } = useAuth()
+  const { user, loading, signOut, teamId, teamMembershipLoading, teamMembershipError } = useAuth()
   const { pathname } = useLocation()
 
   if (loading) {
     return <div className="app-loading">Loading your workspace...</div>
+  }
+  if (user && teamMembershipLoading) {
+    return <div className="app-loading">Checking your team membership...</div>
+  }
+  if (user && (!teamId || teamMembershipError)) {
+    return <NoTeamAccess />
   }
 
   const routes = (

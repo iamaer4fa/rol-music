@@ -4,6 +4,9 @@ import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import SongContributions from './SongContributions'
 import ChordProViewer from '../components/ChordProViewer'
+import EmptyState from '../components/EmptyState'
+import LoadingSkeleton from '../components/LoadingSkeleton'
+import StatusMessage from '../components/StatusMessage'
 import '../App.css'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
 
@@ -130,16 +133,14 @@ export default function SongDetail() {
   }, [user?.id, teamId, id, getTeamMembership])
 
   if (loading) {
-    return <div className="page-container">Loading song...</div>
+    return <div className="page-container"><h2>Song details</h2><LoadingSkeleton rows={4} label="Loading song details" /></div>
   }
 
   if (error || !song) {
     return (
       <div className="page-container">
         <h2>Song unavailable</h2>
-        <p className="error-message" role="alert">
-          {error ?? 'This song could not be found.'}
-        </p>
+        <StatusMessage tone="error">{error ?? 'This song could not be found.'}</StatusMessage>
         <Link to="/catalog" className="btn-primary">Back to Catalog</Link>
       </div>
     )
@@ -217,7 +218,9 @@ export default function SongDetail() {
             ))}
           </ul>
         ) : (
-          <p>No shared audio is attached yet.</p>
+          <EmptyState title="No shared audio attached yet">
+            A team member can add a media link or shared audio from this page.
+          </EmptyState>
         )}
       </section>
 
