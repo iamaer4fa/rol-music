@@ -8,7 +8,13 @@ import ChordProViewer from '../components/ChordProViewer'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
 import StatusMessage from '../components/StatusMessage'
-import { downloadForOffline, readOfflineMedia, removeOfflineMedia } from '../lib/offline'
+import {
+  downloadForOffline,
+  readApplicationCache,
+  readOfflineMedia,
+  removeOfflineMedia,
+  saveApplicationCache,
+} from '../lib/offline'
 import '../App.css'
 
 type Song = {
@@ -76,6 +82,8 @@ export default function PracticeView() {
   const [syncStatus, setSyncStatus] = useState<'idle' | 'private' | 'pending' | 'synced' | 'error'>('idle')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
+  const [cacheUpdatedAt, setCacheUpdatedAt] = useState<string | null>(null)
   const [offlineMediaUrl, setOfflineMediaUrl] = useState<string | null>(null)
   const [offlineMediaReady, setOfflineMediaReady] = useState(false)
   const selectedMedia = song?.media.find((media) => media.id === selectedMediaId) ?? null
@@ -88,7 +96,8 @@ export default function PracticeView() {
   )
 
   useEffect(() => {
-    if (!user?.id || !teamId || !songId) {
+    const activeTeamId = teamId ?? ''
+    if (!user?.id || !activeTeamId || !songId) {
       audioRef.current?.pause()
       void finishSegment().catch((finishError: unknown) => {
         console.error('Unable to close practice session without an active team:', finishError)
@@ -99,6 +108,8 @@ export default function PracticeView() {
       setSelectedArrangementId('')
       setAudioSource(null)
       setAudioSourceName(null)
+      setCacheWarning(null)
+      setCacheUpdatedAt(null)
       setIsPlaying(false)
       setError(!user?.id ? 'Sign in to practice this song.' : !teamId ? 'Your account has no active team.' : 'The song link is missing its ID.')
       setLoading(false)
@@ -109,6 +120,8 @@ export default function PracticeView() {
     async function loadSong() {
       setLoading(true)
       setError(null)
+      setCacheWarning(null)
+      setCacheUpdatedAt(null)
       audioRef.current?.pause()
       void finishSegment().catch((finishError: unknown) => {
         console.error('Unable to close practice session while changing songs:', finishError)
@@ -131,12 +144,35 @@ export default function PracticeView() {
         loopEndMs: null,
         arrangementId: null,
       }
+      let hasCachedSong = false
       try {
+        async function readCachedSong(cacheKey: string) {
+          try {
+            return await readApplicationCache<Song>(activeTeamId, cacheKey)
+          } catch (cacheError) {
+            console.error(`Unable to read Practice Board cache (${cacheKey}):`, cacheError)
+            return null
+          }
+        }
+
+        const cachedPracticeSong = await readCachedSong(`practice-board:${songId}`)
+        const cachedSong = cachedPracticeSong ?? await readCachedSong(`song:${songId}`)
+        if (!active) return
+        if (cachedSong) {
+          hasCachedSong = true
+          setSong(cachedSong.data)
+          setSelectedArrangementId(cachedSong.data.arrangements[0]?.id ?? '')
+          setSelectedMediaId(cachedSong.data.media[0]?.id ?? '')
+          segmentMetadata.current.arrangementId = cachedSong.data.arrangements[0]?.id ?? null
+          setCacheUpdatedAt(cachedSong.updatedAt)
+          setLoading(false)
+        }
+
         const { data: songData, error: songError } = await supa
           .from('songs')
           .select('id, team_id, title, artist, key_signature, tempo_bpm, chordpro_lyrics')
           .eq('id', songId)
-          .eq('team_id', teamId)
+          .eq('team_id', activeTeamId)
           .maybeSingle()
 
         if (songError) {
@@ -151,13 +187,13 @@ export default function PracticeView() {
             .from('song_arrangements')
             .select('id, arrangement_name, key, capo_position, tempo_override')
             .eq('song_id', songId)
-            .eq('team_id', teamId)
+            .eq('team_id', activeTeamId)
             .order('created_at', { ascending: false }),
           supa
             .from('song_media')
             .select('id, media_type, external_url, local_file_reference, description')
             .eq('song_id', songId)
-            .eq('team_id', teamId)
+            .eq('team_id', activeTeamId)
             .order('created_at', { ascending: false }),
         ])
         if (arrangementsResult.error) {
@@ -170,15 +206,41 @@ export default function PracticeView() {
           const arrangements = arrangementsResult.data ?? []
           const media = mediaResult.data ?? []
           const defaultArrangementId = arrangements[0]?.id ?? ''
-          setSong({ ...songData, arrangements, media } as Song)
-          setSelectedArrangementId(defaultArrangementId)
-          setSelectedMediaId(media[0]?.id ?? '')
-          segmentMetadata.current.arrangementId = defaultArrangementId || null
+          const freshSong = { ...songData, arrangements, media } as Song
+          setSong(freshSong)
+          setSelectedArrangementId((current) => {
+            const selectedId = arrangements.some((item) => item.id === current)
+              ? current
+              : defaultArrangementId
+            segmentMetadata.current.arrangementId = selectedId || null
+            return selectedId
+          })
+          setSelectedMediaId((current) =>
+            media.some((item) => item.id === current) ? current : media[0]?.id ?? ''
+          )
+          setError(null)
+          setCacheWarning(null)
+          const updatedAt = new Date().toISOString()
+          void saveApplicationCache(activeTeamId, `practice-board:${songId}`, freshSong)
+            .then(() => {
+              if (active) setCacheUpdatedAt(updatedAt)
+            })
+            .catch((cacheError: unknown) => {
+              console.error('Unable to update the Practice Board cache:', cacheError)
+              if (active) setCacheWarning('Practice Board loaded, but the saved offline copy could not be updated.')
+            })
         }
       } catch (loadError) {
         console.error('Error loading practice song:', loadError)
         if (active) {
-          setError(loadError instanceof Error ? loadError.message : 'Unable to load this song for practice.')
+          const message = loadError instanceof Error
+            ? loadError.message
+            : 'Unable to load this song for practice.'
+          if (hasCachedSong) {
+            setCacheWarning(`Unable to refresh this Practice Board. Showing saved data. ${message}`)
+          } else {
+            setError(message)
+          }
         }
       } finally {
         if (active) setLoading(false)
@@ -580,6 +642,13 @@ export default function PracticeView() {
     <div className="page-container">
       <h2>Practice Board: {song.title}</h2>
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
+      {cacheWarning && <StatusMessage tone="warning">{cacheWarning}</StatusMessage>}
+      {cacheUpdatedAt && (
+        <p className="cache-status" role="status">
+          Practice Board data saved {new Date(cacheUpdatedAt).toLocaleString()}
+          {!navigator.onLine ? ' · Showing saved data offline' : ''}
+        </p>
+      )}
 
       <section className="card">
         <h3>Song Info</h3>

@@ -78,7 +78,7 @@ Use `sudo apt purge rol-music-team` to also remove package-managed configuration
 - YouTube and Spotify use their provider players; external playback is not measured as practice time. Use an uploaded/local audio file or playable direct audio URL for the in-app speed and A-B loop controls and measured playback sessions. Selecting an arrangement updates its displayed key/capo/tempo metadata; automatic chord transposition is not implemented.
 - Published lineups are read-only in the app. Make a replacement draft to correct a published lineup.
 
-The current database schema does not yet store song/arrangement snapshots on published lineup items, so a catalog change made outside the app can change how an older published lineup is displayed. The app also does not yet cache songs and lineups for offline browsing; offline playback requires the audio file to be available locally.
+The current database schema does not yet store song/arrangement snapshots on published lineup items, so a catalog change made outside the app can change how an older published lineup is displayed. The app caches the song catalog/details, lineups, announcements, and Practice Board metadata locally. Cached Practice Board data appears while Supabase refreshes it; the first visit still requires a network connection. Offline playback requires audio to be downloaded and available locally.
 
 ## Project layout
 
