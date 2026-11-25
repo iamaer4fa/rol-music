@@ -88,11 +88,14 @@ export default function PracticeView() {
   const [offlineMediaReady, setOfflineMediaReady] = useState(false)
   const selectedMedia = song?.media.find((media) => media.id === selectedMediaId) ?? null
   const mediaKind = selectedMedia ? parseMediaKind(selectedMedia.media_type) : null
+  const supportsAudioControls = Boolean(
+    audioSource || (selectedMedia && mediaKind === 'audio')
+  )
   const selectedAudioUrl = selectedMedia?.external_url && mediaKind === 'audio'
     ? selectedMedia.external_url
     : null
-  const source = audioSource ?? offlineMediaUrl ?? (
-    selectedMedia?.local_file_reference ? mediaPlaybackUrl : selectedAudioUrl
+  const source = audioSource ?? (supportsAudioControls ? offlineMediaUrl : null) ?? (
+    mediaKind === 'audio' && selectedMedia?.local_file_reference ? mediaPlaybackUrl : selectedAudioUrl
   )
 
   useEffect(() => {
@@ -290,17 +293,24 @@ export default function PracticeView() {
   }, [selectedMedia?.id, selectedMedia?.local_file_reference])
 
   useEffect(() => {
-    if (!selectedMedia || !teamId) {
+    let active = true
+    if (!selectedMedia || !teamId || mediaKind !== 'audio') {
       setOfflineMediaUrl(null)
       setOfflineMediaReady(false)
-      return
+      return () => {
+        active = false
+      }
     }
     const cacheKey = `offline-media:${teamId}:${selectedMedia.id}`
     void readOfflineMedia(cacheKey).then((url) => {
+      if (!active) return
       setOfflineMediaUrl(url)
       setOfflineMediaReady(Boolean(url))
     })
-  }, [selectedMedia?.id, teamId])
+    return () => {
+      active = false
+    }
+  }, [selectedMedia?.id, selectedMedia?.local_file_reference, mediaKind, teamId])
 
   const saveFinishedSegment = useCallback(async (sessionId: string) => {
     const session = await invoke<PracticeSession | null>('finish_practice_segment', {
@@ -567,8 +577,13 @@ export default function PracticeView() {
   }
 
   async function cacheCurrentMedia() {
-    if (!selectedMedia || !teamId) return
-    const downloadUrl = selectedMedia.external_url ?? mediaPlaybackUrl
+    if (!selectedMedia || !teamId || mediaKind !== 'audio') {
+      setError('Offline downloads are only supported for direct or uploaded audio.')
+      return
+    }
+    const downloadUrl = selectedMedia.local_file_reference
+      ? mediaPlaybackUrl
+      : selectedMedia.external_url
     if (!downloadUrl) {
       setError('The shared audio must finish loading before it can be downloaded.')
       return
@@ -697,7 +712,7 @@ export default function PracticeView() {
             })}
           />
         </label>
-        {selectedMedia && (selectedMedia.external_url || mediaPlaybackUrl) && (
+        {selectedMedia && supportsAudioControls && (selectedMedia.external_url || mediaPlaybackUrl) && (
           <div className="offline-media-actions">
             {offlineMediaReady ? (
               <>
@@ -761,8 +776,10 @@ export default function PracticeView() {
               />
             )}
             <p>
-              This provider player is not measured as practice time. For timed practice,
-              playback-speed adjustment, and A-B looping, use an uploaded or direct audio file.
+              {mediaKind === 'youtube'
+                ? 'Use YouTube’s player settings for playback speed. '
+                : 'Use the provider player’s own playback controls. '}
+              Custom A-B looping, offline downloads, and measured practice time require uploaded or direct audio.
             </p>
           </>
         )}
@@ -798,38 +815,45 @@ export default function PracticeView() {
               </select>
             </label>
           )}
-          <label>
-            Playback speed
-            <select
-              value={playbackSpeed}
-              onChange={(event) => onSpeedChange(Number(event.target.value))}
-              disabled={!source}
-            >
-              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((speed) => (
-                <option key={speed} value={speed}>{speed.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}x</option>
-              ))}
-            </select>
-          </label>
-          <button type="button" onClick={() => onSetLoopPoint('start')} disabled={!source}>Set loop A</button>
-          <button type="button" onClick={() => onSetLoopPoint('end')} disabled={!source}>Set loop B</button>
-          <button type="button" onClick={clearLoop} disabled={!source || (loopStartMs === null && loopEndMs === null)}>
-            Clear loop
-          </button>
+          {source && (
+            <>
+              <label>
+                Playback speed
+                <select
+                  value={playbackSpeed}
+                  onChange={(event) => onSpeedChange(Number(event.target.value))}
+                >
+                  {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((speed) => (
+                    <option key={speed} value={speed}>{speed.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}x</option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" onClick={() => onSetLoopPoint('start')}>Set loop A</button>
+              <button type="button" onClick={() => onSetLoopPoint('end')}>Set loop B</button>
+              <button type="button" onClick={clearLoop} disabled={loopStartMs === null && loopEndMs === null}>
+                Clear loop
+              </button>
+            </>
+          )}
         </div>
-        <p>
-          Position {formatTime(currentTime)} / {Number.isFinite(duration) ? formatTime(duration) : '—'}
-          {' · '}Speed {playbackSpeed}x
-        </p>
-        <p>
-          Loop: {loopStartMs !== null && loopEndMs !== null
-            ? `${formatTime(loopStartMs / 1000)}–${formatTime(loopEndMs / 1000)}`
-            : 'off'}
-          {' · '}Repetitions: {loopRepetitions}
-        </p>
-        <p>
-          Playback time is counted only while the local audio position advances normally.
-          It is not proof of attention, attendance, or performance.
-        </p>
+        {source && (
+          <>
+            <p>
+              Position {formatTime(currentTime)} / {Number.isFinite(duration) ? formatTime(duration) : '—'}
+              {' · '}Speed {playbackSpeed}x
+            </p>
+            <p>
+              Loop: {loopStartMs !== null && loopEndMs !== null
+                ? `${formatTime(loopStartMs / 1000)}–${formatTime(loopEndMs / 1000)}`
+                : 'off'}
+              {' · '}Repetitions: {loopRepetitions}
+            </p>
+            <p>
+              Playback time is counted only while the local audio position advances normally.
+              It is not proof of attention, attendance, or performance.
+            </p>
+          </>
+        )}
         {isPlaying && <button type="button" onClick={() => void stopAndSave()} disabled={saving}>
           {saving ? 'Saving…' : 'End and save practice'}
         </button>}
