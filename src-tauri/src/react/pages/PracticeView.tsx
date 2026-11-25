@@ -660,8 +660,9 @@ export default function PracticeView() {
         <p><strong>Capo:</strong> {selectedArrangement?.capo_position ?? 0}</p>
       </section>
 
-      <section className="card">
-        <h3>Audio practice</h3>
+      <div className={`practice-board-layout${mediaKind === 'youtube' && embeddedUrl ? ' has-video' : ''}`}>
+      <section className="card practice-audio-card">
+        <h3>Practice media</h3>
         {song.media.length > 0 && (
           <label>
             Shared media
@@ -740,14 +741,25 @@ export default function PracticeView() {
         )}
         {embeddedUrl && (
           <>
-            <iframe
-              title={`${song.title} ${mediaKind ?? 'media'} player`}
-              src={embeddedUrl}
-              width="100%"
-              height={mediaKind === 'spotify' ? '152' : '315'}
-              allow="autoplay; encrypted-media; picture-in-picture; web-share"
-              allowFullScreen
-            />
+            {mediaKind === 'youtube' ? (
+              <div className="practice-video-frame">
+                <iframe
+                  title={`${song.title} video player`}
+                  src={embeddedUrl}
+                  allow="autoplay; encrypted-media; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <iframe
+                title={`${song.title} ${mediaKind ?? 'media'} player`}
+                src={embeddedUrl}
+                width="100%"
+                height="152"
+                allow="autoplay; encrypted-media; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            )}
             <p>
               This provider player is not measured as practice time. For timed practice,
               playback-speed adjustment, and A-B looping, use an uploaded or direct audio file.
@@ -828,6 +840,12 @@ export default function PracticeView() {
         )}
       </section>
 
+      <ChordProViewer
+        source={song.chordpro_lyrics}
+        defaultKey={selectedArrangement?.key ?? song.key_signature}
+      />
+      </div>
+
       <section className="card">
         <h3>Practice Privacy</h3>
         <label className="checkbox-row">
@@ -844,11 +862,6 @@ export default function PracticeView() {
           from leadership, and keeps pending local records private.
         </p>
       </section>
-
-      <ChordProViewer
-        source={song.chordpro_lyrics}
-        defaultKey={selectedArrangement?.key ?? song.key_signature}
-      />
     </div>
   )
 }

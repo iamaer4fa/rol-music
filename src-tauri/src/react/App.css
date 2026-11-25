@@ -486,11 +486,32 @@ h3 {
   overflow: hidden;
 }
 
+.chordpro-controls-panel {
+  margin-bottom: 0.8rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.chordpro-controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.chordpro-controls-header > strong {
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.chordpro-controls-header .btn-secondary {
+  min-height: 34px;
+}
+
 .chordpro-toolbar {
   flex-wrap: wrap;
   justify-content: space-between;
-  padding-bottom: 0.85rem;
-  border-bottom: 1px solid var(--border-color);
+  padding-top: 0.8rem;
 }
 
 .chordpro-toolbar label {
@@ -573,6 +594,24 @@ h3 {
   color: var(--muted-text);
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.practice-video-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #111;
+}
+
+.practice-video-frame iframe {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
 }
 
 .lineup-batch-picker {
@@ -1380,6 +1419,25 @@ tbody tr:hover td {
 @media (min-width: 1180px) {
   .dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .practice-board-layout.has-video {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+    align-items: start;
+    gap: 1rem;
+  }
+
+  .practice-board-layout.has-video .practice-audio-card,
+  .practice-board-layout.has-video .chordpro-card {
+    min-width: 0;
+    margin-bottom: 0;
+  }
+
+  .practice-board-layout.has-video .chordpro-card {
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .dashboard-card-featured {

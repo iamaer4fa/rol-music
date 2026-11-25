@@ -10,6 +10,7 @@ export default function ChordProViewer({ source, defaultKey }: Props) {
   const [semitones, setSemitones] = useState(0)
   const [fontSize, setFontSize] = useState(16)
   const [columns, setColumns] = useState<1 | 2>(1)
+  const [controlsExpanded, setControlsExpanded] = useState(true)
 
   function transposeBy(change: number) {
     setSemitones((current) => {
@@ -37,33 +38,50 @@ export default function ChordProViewer({ source, defaultKey }: Props) {
 
   return (
     <section className="chordpro-card card">
-      <div className="chordpro-toolbar" aria-label="Chord display controls">
-        <div className="chordpro-toolbar-group">
-          <span>Key</span>
-          <button type="button" className="btn-secondary" onClick={() => transposeBy(-1)} aria-label="Transpose down">−</button>
-          <strong>{getTransposedKey(defaultKey ?? null, semitones) || 'Original'}</strong>
-          <button type="button" className="btn-secondary" onClick={() => transposeBy(1)} aria-label="Transpose up">+</button>
-          {semitones !== 0 && (
-            <button type="button" className="btn-secondary" onClick={() => setSemitones(0)}>Reset</button>
-          )}
+      <h3>Lyrics and chords</h3>
+      <div className="chordpro-controls-panel">
+        <div className="chordpro-controls-header">
+          <strong>Lyrics controls</strong>
+          <button
+            type="button"
+            className="btn-secondary"
+            aria-expanded={controlsExpanded}
+            aria-controls="chordpro-controls"
+            onClick={() => setControlsExpanded((expanded) => !expanded)}
+          >
+            {controlsExpanded ? 'Hide controls' : 'Show controls'}
+          </button>
         </div>
-        <label>
-          Text size
-          <input
-            type="range"
-            min="14"
-            max="28"
-            value={fontSize}
-            onChange={(event) => setFontSize(Number(event.target.value))}
-          />
-        </label>
-        <label>
-          Layout
-          <select value={columns} onChange={(event) => setColumns(Number(event.target.value) as 1 | 2)}>
-            <option value={1}>Single column</option>
-            <option value={2}>Two columns</option>
-          </select>
-        </label>
+        <div id="chordpro-controls" hidden={!controlsExpanded}>
+          <div className="chordpro-toolbar" aria-label="Chord display controls">
+            <div className="chordpro-toolbar-group">
+              <span>Key</span>
+              <button type="button" className="btn-secondary" onClick={() => transposeBy(-1)} aria-label="Transpose down">−</button>
+              <strong>{getTransposedKey(defaultKey ?? null, semitones) || 'Original'}</strong>
+              <button type="button" className="btn-secondary" onClick={() => transposeBy(1)} aria-label="Transpose up">+</button>
+              {semitones !== 0 && (
+                <button type="button" className="btn-secondary" onClick={() => setSemitones(0)}>Reset</button>
+              )}
+            </div>
+            <label>
+              Text size
+              <input
+                type="range"
+                min="14"
+                max="28"
+                value={fontSize}
+                onChange={(event) => setFontSize(Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Layout
+              <select value={columns} onChange={(event) => setColumns(Number(event.target.value) as 1 | 2)}>
+                <option value={1}>Single column</option>
+                <option value={2}>Two columns</option>
+              </select>
+            </label>
+          </div>
+        </div>
       </div>
 
       <details className="chordpro-source">
