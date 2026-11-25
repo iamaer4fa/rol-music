@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { readApplicationCache, saveApplicationCache } from '../lib/offline'
 import { getDateInTimeZone, getUpcomingServiceDate } from '../lib/workflow'
 import { canManageTeam } from '../lib/roles'
@@ -321,6 +321,12 @@ export default function WeeklyLineup() {
     setTransitionNotes('')
   }
 
+  function resetSongManager() {
+    resetItemForm()
+    setSelectedBatchSongIds([])
+    setLineupSongSearch('')
+  }
+
   async function startNewLineup() {
     if (!teamId || !isLeader) return
     setError(null)
@@ -381,6 +387,7 @@ export default function WeeklyLineup() {
         version: data.version,
         songs: [],
       })
+      resetSongManager()
       setShowNewLineupForm(false)
       showNotice('Draft lineup created.')
     } catch (createError) {
@@ -439,6 +446,7 @@ export default function WeeklyLineup() {
       }
 
       setSelectedId(data.id)
+      resetSongManager()
       await loadLineup(data.id)
       setLineups((current) => [
         { id: data.id, service_date: data.service_date, service_title: data.service_title, status: data.status },
@@ -792,6 +800,7 @@ export default function WeeklyLineup() {
               const nextId = event.target.value || null
               setSelectedId(nextId)
               setLineup(null)
+              resetSongManager()
               if (nextId) {
                 void loadLineup(nextId).catch((loadError: unknown) => {
                   console.error('Error loading selected lineup:', loadError)
@@ -824,14 +833,16 @@ export default function WeeklyLineup() {
         <form className="card" onSubmit={(event) => void createDraft(event)}>
           <h3>Create a New Lineup</h3>
           <p>The service date defaults to your team’s next scheduled service.</p>
-          <label>
-            Service date
-            <input type="date" value={serviceDate} onChange={(event) => setServiceDate(event.target.value)} required />
-          </label>
-          <label>
-            Service title
-            <input value={serviceTitle} onChange={(event) => setServiceTitle(event.target.value)} maxLength={255} />
-          </label>
+          <div className="lineup-service-fields">
+            <label>
+              Service date
+              <input type="date" value={serviceDate} onChange={(event) => setServiceDate(event.target.value)} required />
+            </label>
+            <label>
+              Service title
+              <input value={serviceTitle} onChange={(event) => setServiceTitle(event.target.value)} maxLength={255} />
+            </label>
+          </div>
           <button type="submit" className="btn-primary" disabled={saving}>
             {saving ? 'Creating…' : 'Create Draft'}
           </button>
@@ -853,6 +864,11 @@ export default function WeeklyLineup() {
         <>
           <h3>{lineup.title} — {lineup.service_date}</h3>
           <p>Status: {lineup.status} · Revision {lineup.version}</p>
+          {isLeader && lineup.status === 'published' && (
+            <p className="lineup-management-note">
+              Published lineups are read-only. Create a replacement draft to add or remove songs.
+            </p>
+          )}
           {lineup.songs.length === 0 ? (
             <EmptyState title="This lineup has no songs yet">
               {isLeader && lineup.status === 'draft'
@@ -863,67 +879,91 @@ export default function WeeklyLineup() {
           <div className="table-scroll" role="region" aria-label="Lineup songs" tabIndex={0}>
           <table className="table responsive-table lineup-table">
             <thead>
-              <tr><th>#</th><th>Song</th><th>Key</th><th>Tempo</th><th>Arrangement</th><th>Transition</th>{isLeader && lineup.status === 'draft' && <th>Actions</th>}</tr>
+              <tr><th>#</th><th>Song</th><th>Musical setup</th><th>Transition</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              {lineup.songs.map((item, index) => (
-                <tr
-                  key={item.id}
-                  draggable={isLeader && lineup.status === 'draft'}
-                  onDragStart={() => setDraggedItemId(item.id)}
-                  onDragOver={(event) => {
-                    if (isLeader && lineup.status === 'draft') event.preventDefault()
-                  }}
-                  onDrop={() => {
-                    if (!draggedItemId || draggedItemId === item.id) return
-                    const draggedIndex = lineup.songs.findIndex((candidate) => candidate.id === draggedItemId)
-                    if (draggedIndex < 0) return
-                    const reordered = [...lineup.songs]
-                    const [dragged] = reordered.splice(draggedIndex, 1)
-                    if (!dragged) return
-                    reordered.splice(index, 0, dragged)
-                    setDraggedItemId(null)
-                    void reorderItems(reordered)
-                  }}
-                  onDragEnd={() => setDraggedItemId(null)}
-                >
-                  <td>{index + 1}</td>
-                  <td>{(Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'Unknown'}</td>
-                  <td>{item.key_override ?? (Array.isArray(item.song) ? item.song[0] : item.song)?.key_signature ?? '—'}</td>
-                  <td>{item.tempo_override ?? (Array.isArray(item.song) ? item.song[0] : item.song)?.tempo_bpm ?? '—'}</td>
-                  <td>{(Array.isArray(item.selected_arrangement) ? item.selected_arrangement[0] : item.selected_arrangement)?.arrangement_name ?? '—'}</td>
-                  <td>{item.transition_notes || '—'}</td>
-                  {isLeader && lineup.status === 'draft' && (
-                    <td>
-                      <button type="button" onClick={() => void moveItem(index, -1)} disabled={index === 0} aria-label={`Move ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} up`}>↑</button>
-                      <button type="button" onClick={() => void moveItem(index, 1)} disabled={index === lineup.songs.length - 1} aria-label={`Move ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} down`}>↓</button>
-                      <button
-                        type="button"
-                        aria-label={`Edit ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')}`}
-                        onClick={() => {
-                          const song = catalogSongs.find((candidate) => candidate.id === item.song_id)
-                          setEditingItemId(item.id)
-                          setSelectedSongId(item.song_id)
-                          setSelectedArrangementId(item.selected_arrangement_id ?? '')
-                          setKeyOverride(item.key_override ?? '')
-                          setTempoOverride(item.tempo_override?.toString() ?? '')
-                          setTransitionNotes(item.transition_notes ?? '')
-                          if (!song) setError('The song for this lineup item is no longer active.')
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${((Array.isArray(item.song) ? item.song[0] : item.song)?.title ?? 'song')} from lineup`}
-                        onClick={() => void removeItem(item)}
-                      >
-                        Remove
-                      </button>
+              {lineup.songs.map((item, index) => {
+                const song = Array.isArray(item.song) ? item.song[0] : item.song
+                const arrangement = Array.isArray(item.selected_arrangement)
+                  ? item.selected_arrangement[0]
+                  : item.selected_arrangement
+                const title = song?.title ?? 'Unknown'
+                const songKey = item.key_override ?? song?.key_signature ?? '—'
+                const songTempo = item.tempo_override ?? song?.tempo_bpm
+                return (
+                  <tr
+                    key={item.id}
+                    draggable={isLeader && lineup.status === 'draft'}
+                    onDragStart={() => setDraggedItemId(item.id)}
+                    onDragOver={(event) => {
+                      if (isLeader && lineup.status === 'draft') event.preventDefault()
+                    }}
+                    onDrop={() => {
+                      if (!draggedItemId || draggedItemId === item.id) return
+                      const draggedIndex = lineup.songs.findIndex((candidate) => candidate.id === draggedItemId)
+                      if (draggedIndex < 0) return
+                      const reordered = [...lineup.songs]
+                      const [dragged] = reordered.splice(draggedIndex, 1)
+                      if (!dragged) return
+                      reordered.splice(index, 0, dragged)
+                      setDraggedItemId(null)
+                      void reorderItems(reordered)
+                    }}
+                    onDragEnd={() => setDraggedItemId(null)}
+                  >
+                    <td data-label="#">{index + 1}</td>
+                    <td data-label="Song"><strong>{title}</strong></td>
+                    <td data-label="Musical setup">
+                      <div className="lineup-song-setup">
+                        <span><strong>Key</strong> {songKey}</span>
+                        <span><strong>Tempo</strong> {songTempo != null ? `${songTempo} BPM` : '—'}</span>
+                        <span><strong>Arrangement</strong> {arrangement?.arrangement_name ?? 'Default'}</span>
+                      </div>
                     </td>
-                  )}
-                </tr>
-              ))}
+                    <td data-label="Transition">{item.transition_notes || '—'}</td>
+                    <td data-label="Actions">
+                      <div className="lineup-row-actions">
+                        <Link
+                          className="lineup-practice-link"
+                          to={`/practice-board/${item.song_id}`}
+                          aria-label={`Practice ${title}`}
+                        >
+                          Practice
+                        </Link>
+                        {isLeader && lineup.status === 'draft' && (
+                          <>
+                            <button type="button" onClick={() => void moveItem(index, -1)} disabled={index === 0} aria-label={`Move ${title} up`}>↑</button>
+                            <button type="button" onClick={() => void moveItem(index, 1)} disabled={index === lineup.songs.length - 1} aria-label={`Move ${title} down`}>↓</button>
+                            <button
+                              type="button"
+                              aria-label={`Edit ${title}`}
+                              onClick={() => {
+                                const song = catalogSongs.find((candidate) => candidate.id === item.song_id)
+                                setEditingItemId(item.id)
+                                setSelectedSongId(item.song_id)
+                                setSelectedArrangementId(item.selected_arrangement_id ?? '')
+                                setKeyOverride(item.key_override ?? '')
+                                setTempoOverride(item.tempo_override?.toString() ?? '')
+                                setTransitionNotes(item.transition_notes ?? '')
+                                if (!song) setError('The song for this lineup item is no longer active.')
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${title} from lineup`}
+                              onClick={() => void removeItem(item)}
+                            >
+                              Remove
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
           </div>
@@ -1030,8 +1070,11 @@ export default function WeeklyLineup() {
 
           {isLeader && lineup.status === 'draft' && (
             <>
+              <div className="lineup-management-note">
+                Manage songs in this draft. Changes apply only to <strong>{lineup.title}</strong> on {lineup.service_date}.
+              </div>
               <section className="card lineup-batch-picker">
-                <h3>Add multiple songs</h3>
+                <h3>Add songs to this lineup</h3>
                 <label>
                   Search catalog
                   <input
@@ -1072,8 +1115,9 @@ export default function WeeklyLineup() {
               </section>
               <form className="card" onSubmit={(event) => void saveLineupItem(event)}>
               <h3>{editingItemId ? 'Edit lineup item' : 'Add one song with details'}</h3>
+              <div className="lineup-item-fields">
               {!editingItemId && (
-                <label>
+                <label className="lineup-song-field">
                   Song
                   <select value={selectedSongId} onChange={(event) => {
                     setSelectedSongId(event.target.value)
@@ -1086,7 +1130,11 @@ export default function WeeklyLineup() {
                   </select>
                 </label>
               )}
-              {editingItemId && <p>{catalogSongs.find((song) => song.id === selectedSongId)?.title}</p>}
+              {editingItemId && (
+                <p className="lineup-song-field lineup-item-song-title">
+                  {catalogSongs.find((song) => song.id === selectedSongId)?.title}
+                </p>
+              )}
               <label>
                 Arrangement
                 <select
@@ -1107,10 +1155,11 @@ export default function WeeklyLineup() {
                 Tempo override (BPM)
                 <input type="number" min="1" step="1" value={tempoOverride} onChange={(event) => setTempoOverride(event.target.value)} />
               </label>
-              <label>
+              <label className="lineup-transition-field">
                 Transition notes
                 <textarea value={transitionNotes} onChange={(event) => setTransitionNotes(event.target.value)} rows={3} />
               </label>
+              </div>
               <button type="submit" className="btn-primary" disabled={saving || (!editingItemId && !selectedSongId)}>
                 {saving ? 'Saving…' : editingItemId ? 'Save Item' : 'Add Song'}
               </button>
