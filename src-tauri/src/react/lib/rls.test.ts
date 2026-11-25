@@ -83,4 +83,34 @@ describe('database migration security', () => {
     expect(page).toContain('This cannot be undone.')
     expect(page).toContain('lineup.service_date < getDateInTimeZone(new Date(), teamTimezone)')
   })
+
+  it('supports published special events alongside weekly worship lineups', () => {
+    const migration = readFileSync(
+      'src-tauri/src/db/20261125_special_event_lineups.sql',
+      'utf8',
+    )
+    const page = readFileSync(
+      'src-tauri/src/react/pages/WeeklyLineup.tsx',
+      'utf8',
+    )
+    const dashboard = readFileSync(
+      'src-tauri/src/react/pages/HomeDashboard.tsx',
+      'utf8',
+    )
+
+    expect(migration).toContain("DEFAULT 'worship_service'")
+    expect(migration).toContain("CHECK (event_type IN ('worship_service', 'special_event'))")
+    expect(migration).toContain('GRANT UPDATE (event_type, replaces_lineup_id) ON public.lineups TO authenticated')
+    expect(migration).toContain('BEFORE UPDATE OF event_type ON public.lineups')
+    expect(migration).toContain("OLD.status <> 'draft'")
+    expect(migration).toContain('ON public.lineups (team_id, service_date, event_type)')
+    expect(migration).toContain('AND event_type = candidate.event_type')
+    expect(page).toContain('event_type: eventType')
+    expect(page).toContain('saveDraftEventDetails')
+    expect(page).toContain('replaces_lineup_id: null')
+    expect(page).toContain('Save lineup details')
+    expect(page).toContain('Drafts are visible only to leaders.')
+    expect(dashboard).toContain(".eq('event_type', 'special_event')")
+    expect(dashboard).toContain('Upcoming events')
+  })
 })

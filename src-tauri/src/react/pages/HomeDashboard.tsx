@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { supa } from '../lib/supabase'
 import { useAuth } from '../hooks/use-auth'
 import '../App.css'
-import { getUpcomingServiceDate } from '../lib/workflow'
+import { getDateInTimeZone, getUpcomingServiceDate } from '../lib/workflow'
 import type { AnnouncementRecord, PersonalPracticeRecord, SongRecord } from '../lib/models'
 import EmptyState from '../components/EmptyState'
 import LoadingSkeleton from '../components/LoadingSkeleton'
@@ -13,6 +13,7 @@ import StatusMessage from '../components/StatusMessage'
 
 export default function HomeDashboard() {
   const { user, teamId } = useAuth()
+  type UpcomingEvent = { id: string; service_date: string; service_title: string | null }
   type UpcomingLineupItem = {
     id: string
     position: number
@@ -23,6 +24,7 @@ export default function HomeDashboard() {
     selected_arrangement: { id: string; arrangement_name: string } | Array<{ id: string; arrangement_name: string }> | null
   }
   const [upcomingService, setUpcomingService] = useState<{ lineupId: string | null; serviceDate: string; serviceTitle: string; songs: UpcomingLineupItem[] } | null>(null)
+  const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [serviceAssignments, setServiceAssignments] = useState<Array<{ role_name: string; preparation_status: string; display_name: string }>>([])
   const [recentSongs, setRecentSongs] = useState<SongRecord[]>([])
   const [recentAnnouncements, setRecentAnnouncements] = useState<AnnouncementRecord[]>([])
@@ -65,29 +67,45 @@ export default function HomeDashboard() {
           day: 'numeric',
         }).format(new Date(`${serviceDate}T00:00:00Z`))
 
-        const { data: publishedLineup, error: lineupError } = await supa
-          .from('lineups')
-          .select(`
-            id,
-            service_title,
-            lineup_items(
+        const [weeklyLineupResult, specialEventsResult] = await Promise.all([
+          supa
+            .from('lineups')
+            .select(`
               id,
-              position,
-              song_id,
-              key_override,
-              tempo_override,
-              transition_notes,
-              song:songs(id, title, key_signature, tempo_bpm),
-              selected_arrangement:song_arrangements(id, arrangement_name)
-            )
-          `)
-          .eq('team_id', activeTeamId)
-          .eq('service_date', serviceDate)
-          .eq('status', 'published')
-          .order('version', { ascending: false })
-          .limit(1)
-          .maybeSingle()
+              service_title,
+              lineup_items(
+                id,
+                position,
+                song_id,
+                key_override,
+                tempo_override,
+                transition_notes,
+                song:songs(id, title, key_signature, tempo_bpm),
+                selected_arrangement:song_arrangements(id, arrangement_name)
+              )
+            `)
+            .eq('team_id', activeTeamId)
+            .eq('service_date', serviceDate)
+            .eq('event_type', 'worship_service')
+            .eq('status', 'published')
+            .order('version', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supa
+            .from('lineups')
+            .select('id, service_date, service_title')
+            .eq('team_id', activeTeamId)
+            .eq('event_type', 'special_event')
+            .eq('status', 'published')
+            .gte('service_date', getDateInTimeZone(new Date(), timezone))
+            .order('service_date', { ascending: true })
+            .limit(5),
+        ])
+        const { data: publishedLineup, error: lineupError } = weeklyLineupResult
+        const { data: specialEvents, error: specialEventsError } = specialEventsResult
         if (lineupError) throw lineupError
+        if (specialEventsError) throw specialEventsError
+        setUpcomingEvents(specialEvents ?? [])
 
         const lineupSongs = [...(publishedLineup?.lineup_items ?? [])].sort(
           (left, right) => left.position - right.position,
@@ -281,6 +299,25 @@ export default function HomeDashboard() {
               </div>
             )}
           </div>
+        )}
+
+        {upcomingEvents.length > 0 && (
+          <section className="card">
+            <h3>Upcoming events</h3>
+            <ul className="dashboard-upcoming-events">
+              {upcomingEvents.map((event) => (
+                <li key={event.id}>
+                  <div>
+                    <strong>{event.service_title ?? 'Special Event'}</strong>
+                    <span>{event.service_date}</span>
+                  </div>
+                  <Link className="btn-secondary" to={`/lineup?lineupId=${event.id}`}>
+                    Open event
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {recentSongs.length > 0 && (

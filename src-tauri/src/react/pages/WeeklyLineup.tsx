@@ -23,13 +23,28 @@ type LineupSong = {
   selected_arrangement: { id: string; arrangement_name: string } | Array<{ id: string; arrangement_name: string }> | null
 }
 
+type LineupEventType = 'worship_service' | 'special_event'
+
+type LineupSummary = {
+  id: string
+  service_date: string
+  service_title: string | null
+  event_type: LineupEventType
+  status: 'draft' | 'published' | 'archived'
+}
+
 type Lineup = {
   id: string
   service_date: string
   title: string
+  event_type: LineupEventType
   status: 'draft' | 'published' | 'archived'
   version: number
   songs: LineupSong[]
+}
+
+function getLineupTitle(eventType: LineupEventType, serviceTitle: string | null) {
+  return serviceTitle ?? (eventType === 'special_event' ? 'Special Event' : 'Worship Service')
 }
 
 type CatalogSong = {
@@ -65,7 +80,7 @@ export default function WeeklyLineup() {
   const queryLineupId = searchParams.get('lineupId')
   const requestedLineupId = routeLineupId ?? queryLineupId
   const isLeader = canManageTeam(accessRole)
-  const [lineups, setLineups] = useState<Array<{ id: string; service_date: string; service_title: string | null; status: Lineup['status'] }>>([])
+  const [lineups, setLineups] = useState<LineupSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(requestedLineupId)
   const [lineup, setLineup] = useState<Lineup | null>(null)
   const [catalogSongs, setCatalogSongs] = useState<CatalogSong[]>([])
@@ -77,6 +92,9 @@ export default function WeeklyLineup() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const [serviceDate, setServiceDate] = useState(new Date().toISOString().slice(0, 10))
   const [teamTimezone, setTeamTimezone] = useState('Asia/Manila')
+  const [eventType, setEventType] = useState<LineupEventType>('worship_service')
+  const [draftEventType, setDraftEventType] = useState<LineupEventType>('worship_service')
+  const [draftEventTitle, setDraftEventTitle] = useState('')
   const [serviceTitle, setServiceTitle] = useState('Sunday Worship')
   const [showNewLineupForm, setShowNewLineupForm] = useState(false)
   const [lineupSongSearch, setLineupSongSearch] = useState('')
@@ -103,19 +121,26 @@ export default function WeeklyLineup() {
   const loadLineup = useCallback(async (id: string) => {
     if (!teamId) return
     const cached = await readApplicationCache<{
-      lineup: Lineup
+      lineup: Omit<Lineup, 'event_type'> & { event_type?: LineupEventType }
       history: Array<{ id: string; action: string; details: Record<string, unknown>; created_at: string }>
       assignments: LineupAssignment[]
     }>(teamId, `lineup:${id}`).catch(() => null)
     if (cached) {
-      setLineup(cached.data.lineup)
+      const eventType = cached.data.lineup.event_type ?? 'worship_service'
+      setLineup({
+        ...cached.data.lineup,
+        event_type: eventType,
+        title: getLineupTitle(eventType, cached.data.lineup.title),
+      })
+      setDraftEventType(eventType)
+      setDraftEventTitle(cached.data.lineup.title)
       setLineupHistory(cached.data.history)
       setLineupAssignments(cached.data.assignments)
     }
     const { data, error: loadError } = await supa
       .from('lineups')
       .select(`
-        id, service_date, service_title, status, version,
+        id, service_date, service_title, event_type, status, version,
         lineup_items (
           id, lineup_id, song_id, position, selected_arrangement_id,
           key_override, tempo_override, transition_notes,
@@ -136,11 +161,14 @@ export default function WeeklyLineup() {
     setLineup({
       id: data.id,
       service_date: data.service_date,
-      title: data.service_title ?? 'Worship Service',
+      title: getLineupTitle(data.event_type, data.service_title),
+      event_type: data.event_type,
       status: data.status,
       version: data.version,
       songs: [...(data.lineup_items ?? [])].sort((a, b) => a.position - b.position) as LineupSong[],
     })
+    setDraftEventType(data.event_type)
+    setDraftEventTitle(data.service_title ?? getLineupTitle(data.event_type, null))
     const { data: history } = await supa
       .from('lineup_change_history')
       .select('id, action, details, created_at')
@@ -160,7 +188,8 @@ export default function WeeklyLineup() {
       lineup: {
         id: data.id,
         service_date: data.service_date,
-        title: data.service_title ?? 'Worship Service',
+        title: getLineupTitle(data.event_type, data.service_title),
+        event_type: data.event_type,
         status: data.status,
         version: data.version,
         songs: [...(data.lineup_items ?? [])].sort((a, b) => a.position - b.position),
@@ -184,8 +213,13 @@ export default function WeeklyLineup() {
       if (!activeTeamId) return
       setLoading(true)
       setError(null)
-      const cached = await readApplicationCache<Array<{ id: string; service_date: string; service_title: string | null; status: Lineup['status'] }>>(activeTeamId, 'lineups').catch(() => null)
-      if (cached && active) setLineups(cached.data)
+      const cached = await readApplicationCache<LineupSummary[]>(activeTeamId, 'lineups').catch(() => null)
+      if (cached && active) {
+        setLineups(cached.data.map((item) => ({
+          ...item,
+          event_type: item.event_type ?? 'worship_service',
+        })))
+      }
       try {
         const [
           { data: lineupRows, error: lineupError },
@@ -197,7 +231,7 @@ export default function WeeklyLineup() {
           await Promise.all([
             supa
               .from('lineups')
-              .select('id, service_date, service_title, status, version')
+              .select('id, service_date, service_title, event_type, status, version')
               .eq('team_id', activeTeamId)
               .order('service_date', { ascending: false })
               .order('version', { ascending: false })
@@ -243,6 +277,7 @@ export default function WeeklyLineup() {
           timeZone: 'UTC',
         })
         setServiceTitle(`${serviceDayName} Worship`)
+        setEventType('worship_service')
 
         const rows = lineupRows ?? []
         setLineups(rows)
@@ -257,7 +292,8 @@ export default function WeeklyLineup() {
         const defaultId =
           requestedLineupId && rows.some((row) => row.id === requestedLineupId)
             ? requestedLineupId
-            : rows.find((row) => row.status === 'published')?.id ??
+            : rows.find((row) => row.status === 'published' && row.event_type === 'worship_service')?.id ??
+              rows.find((row) => row.status === 'published')?.id ??
               (isLeader ? rows.find((row) => row.status === 'draft')?.id : undefined) ??
               null
         setSelectedId(defaultId)
@@ -265,7 +301,7 @@ export default function WeeklyLineup() {
           const { data, error: detailError } = await supa
             .from('lineups')
             .select(`
-              id, service_date, service_title, status, version,
+              id, service_date, service_title, event_type, status, version,
               lineup_items (
                 id, lineup_id, song_id, position, selected_arrangement_id,
                 key_override, tempo_override, transition_notes,
@@ -344,6 +380,7 @@ export default function WeeklyLineup() {
         settings?.service_cutoff_time ?? '09:00:00',
       )
       setServiceDate(nextDate)
+      setEventType('worship_service')
       const serviceDayName = new Date(`${nextDate}T00:00:00Z`).toLocaleDateString('en-US', {
         weekday: 'long',
         timeZone: 'UTC',
@@ -359,6 +396,10 @@ export default function WeeklyLineup() {
   async function createDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!user?.id || !teamId || !isLeader) return
+    if (eventType === 'special_event' && !serviceTitle.trim()) {
+      setError('Enter a name for the special event.')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -368,31 +409,99 @@ export default function WeeklyLineup() {
           team_id: teamId,
           service_date: serviceDate,
           service_title: serviceTitle.trim() || null,
+          event_type: eventType,
           status: 'draft',
           created_by: user.id,
         })
-        .select('id, service_date, service_title, status, version')
+        .select('id, service_date, service_title, event_type, status, version')
         .single()
       if (createError) throw createError
       setLineups((current) => [
-        { id: data.id, service_date: data.service_date, service_title: data.service_title, status: data.status },
+        {
+          id: data.id,
+          service_date: data.service_date,
+          service_title: data.service_title,
+          event_type: data.event_type,
+          status: data.status,
+        },
         ...current,
       ])
       setSelectedId(data.id)
       setLineup({
         id: data.id,
         service_date: data.service_date,
-        title: data.service_title ?? 'Worship Service',
+        title: getLineupTitle(data.event_type, data.service_title),
+        event_type: data.event_type,
         status: data.status,
         version: data.version,
         songs: [],
       })
+      setDraftEventType(data.event_type)
+      setDraftEventTitle(data.service_title ?? getLineupTitle(data.event_type, null))
       resetSongManager()
       setShowNewLineupForm(false)
       showNotice('Draft lineup created.')
     } catch (createError) {
       console.error('Error creating draft lineup:', createError)
       setError('Unable to create draft lineup. Check leader permissions and try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function saveDraftEventDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!lineup || !teamId || !isLeader || lineup.status !== 'draft') return
+
+    const title = draftEventTitle.trim() || null
+    if (draftEventType === 'special_event' && !title) {
+      setError('Enter a name for the special event.')
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      const { data, error: updateError } = await supa
+        .from('lineups')
+        .update({
+          event_type: draftEventType,
+          service_title: title,
+          updated_at: new Date().toISOString(),
+          ...(draftEventType !== lineup.event_type ? { replaces_lineup_id: null } : {}),
+        })
+        .eq('id', lineup.id)
+        .eq('team_id', teamId)
+        .eq('status', 'draft')
+        .select('id')
+        .maybeSingle()
+      if (updateError) throw updateError
+      if (!data) throw new Error('The draft lineup is no longer editable.')
+
+      const updatedLineup = {
+        ...lineup,
+        title: getLineupTitle(draftEventType, title),
+        event_type: draftEventType,
+      }
+      setLineup(updatedLineup)
+      setLineups((current) => current.map((item) => item.id === lineup.id
+        ? { ...item, service_title: title, event_type: draftEventType }
+        : item))
+      try {
+        await saveApplicationCache(teamId, `lineup:${lineup.id}`, {
+          lineup: updatedLineup,
+          history: lineupHistory,
+          assignments: lineupAssignments,
+        })
+      } catch (cacheError) {
+        console.error('Unable to refresh the cached lineup details:', cacheError)
+        showNotice('Lineup details were saved, but the offline cache could not be refreshed.', 'warning')
+        return
+      }
+      showNotice('Lineup details saved.')
+    } catch (saveError) {
+      console.error('Unable to save draft lineup details:', saveError)
+      setError('Unable to save lineup details. Check leader permissions and try again.')
     } finally {
       setSaving(false)
     }
@@ -410,12 +519,13 @@ export default function WeeklyLineup() {
           team_id: teamId,
           service_date: lineup.service_date,
           service_title: `${lineup.title} (Revision)`,
+          event_type: lineup.event_type,
           status: 'draft',
           replaces_lineup_id: lineup.id,
           version: lineup.version + 1,
           created_by: user.id,
         })
-        .select('id, service_date, service_title, status, version')
+        .select('id, service_date, service_title, event_type, status, version')
         .single()
       if (createError) throw createError
 
@@ -449,7 +559,13 @@ export default function WeeklyLineup() {
       resetSongManager()
       await loadLineup(data.id)
       setLineups((current) => [
-        { id: data.id, service_date: data.service_date, service_title: data.service_title, status: data.status },
+        {
+          id: data.id,
+          service_date: data.service_date,
+          service_title: data.service_title,
+          event_type: data.event_type,
+          status: data.status,
+        },
         ...current,
       ])
       showNotice('Revision draft created. The published lineup remains unchanged.')
@@ -698,8 +814,11 @@ export default function WeeklyLineup() {
       const remainingLineups = lineups.filter((item) => item.id !== lineup.id)
       const nextLineup =
         remainingLineups.find((item) =>
-          item.service_date === lineup.service_date && item.status === 'published'
+          item.service_date === lineup.service_date
+          && item.event_type === lineup.event_type
+          && item.status === 'published'
         ) ??
+        remainingLineups.find((item) => item.status === 'published' && item.event_type === 'worship_service') ??
         remainingLineups.find((item) => item.status === 'published') ??
         (isLeader ? remainingLineups.find((item) => item.status === 'draft') : undefined)
       setLineups(remainingLineups)
@@ -758,7 +877,9 @@ export default function WeeklyLineup() {
       setLineups((current) => current.map((item) =>
         item.id === lineup.id
           ? { ...item, status: 'published' }
-          : item.service_date === lineup.service_date && item.status === 'published'
+          : item.service_date === lineup.service_date
+            && item.event_type === lineup.event_type
+            && item.status === 'published'
             ? { ...item, status: 'archived' }
             : item
       ))
@@ -769,8 +890,11 @@ export default function WeeklyLineup() {
         && 'message' in publishError && typeof publishError.message === 'string'
         ? publishError.message
         : ''
-      if (message.includes('A published lineup already exists for this service date')) {
-        setError('A lineup is already published for this Sunday. Create a replacement draft from the published lineup to replace it.')
+      if (
+        message.includes('A published lineup of this type already exists for this date')
+        || message.includes('A published lineup already exists for this service date')
+      ) {
+        setError('A lineup of this type is already published for this date. Create a replacement draft from it to replace it.')
       } else if (message.includes('replacement draft is stale')) {
         setError('This replacement draft is out of date. Create a new replacement draft from the currently published lineup.')
       } else {
@@ -811,7 +935,7 @@ export default function WeeklyLineup() {
           >
             {lineups.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.service_date} — {item.service_title ?? 'Worship Service'} ({item.status})
+                {item.service_date} — {item.event_type === 'special_event' ? 'Event' : 'Worship'}: {item.service_title ?? getLineupTitle(item.event_type, null)} ({item.status})
               </option>
             ))}
           </select>
@@ -831,16 +955,40 @@ export default function WeeklyLineup() {
 
       {isLeader && (showNewLineupForm || !lineup) && (
         <form className="card" onSubmit={(event) => void createDraft(event)}>
-          <h3>Create a New Lineup</h3>
-          <p>The service date defaults to your team’s next scheduled service.</p>
+          <h3>{eventType === 'special_event' ? 'Create a Special Event' : 'Create a New Lineup'}</h3>
+          <p>
+            {eventType === 'special_event'
+              ? 'Choose the event date and name. The date starts at your team’s next scheduled service.'
+              : 'The service date defaults to your team’s next scheduled service.'}
+          </p>
           <div className="lineup-service-fields">
             <label>
-              Service date
+              {eventType === 'special_event' ? 'Event date' : 'Service date'}
               <input type="date" value={serviceDate} onChange={(event) => setServiceDate(event.target.value)} required />
             </label>
             <label>
-              Service title
-              <input value={serviceTitle} onChange={(event) => setServiceTitle(event.target.value)} maxLength={255} />
+              Lineup type
+              <select
+                value={eventType}
+                onChange={(event) => {
+                  const nextType = event.target.value as LineupEventType
+                  setEventType(nextType)
+                  setServiceTitle(nextType === 'special_event' ? '' : 'Worship Service')
+                }}
+              >
+                <option value="worship_service">Weekly worship service</option>
+                <option value="special_event">Special event</option>
+              </select>
+            </label>
+            <label className="lineup-title-field">
+              {eventType === 'special_event' ? 'Event name' : 'Service title'}
+              <input
+                value={serviceTitle}
+                onChange={(event) => setServiceTitle(event.target.value)}
+                maxLength={255}
+                placeholder={eventType === 'special_event' ? 'Christmas Concert' : 'Sunday Worship'}
+                required={eventType === 'special_event'}
+              />
             </label>
           </div>
           <button type="submit" className="btn-primary" disabled={saving}>
@@ -856,14 +1004,55 @@ export default function WeeklyLineup() {
 
       {!lineup && !isLeader && (
         <EmptyState title="No published lineup found">
-          Your team’s published service lineups will appear here.
+          Your team’s published worship services and special events will appear here.
         </EmptyState>
       )}
 
       {lineup && !showNewLineupForm && (
         <>
           <h3>{lineup.title} — {lineup.service_date}</h3>
-          <p>Status: {lineup.status} · Revision {lineup.version}</p>
+          <p>
+            {lineup.event_type === 'special_event' ? 'Special event' : 'Weekly worship'}
+            {' · '}Status: {lineup.status} · Revision {lineup.version}
+          </p>
+          {isLeader && lineup.status === 'draft' && (
+            <p className="lineup-management-note">
+              Drafts are visible only to leaders. Publish this lineup to make it visible to team members.
+            </p>
+          )}
+          {isLeader && lineup.status === 'draft' && (
+            <form className="card lineup-event-details" onSubmit={(event) => void saveDraftEventDetails(event)}>
+              <h3>Lineup details</h3>
+              <div className="lineup-service-fields">
+                <label>
+                  Lineup type
+                  <select
+                    value={draftEventType}
+                    onChange={(event) => {
+                      const nextType = event.target.value as LineupEventType
+                      setDraftEventType(nextType)
+                    }}
+                  >
+                    <option value="worship_service">Weekly worship service</option>
+                    <option value="special_event">Special event</option>
+                  </select>
+                </label>
+                <label className="lineup-title-field">
+                  {draftEventType === 'special_event' ? 'Event name' : 'Service title'}
+                  <input
+                    value={draftEventTitle}
+                    onChange={(event) => setDraftEventTitle(event.target.value)}
+                    maxLength={255}
+                    placeholder={draftEventType === 'special_event' ? 'Christmas Concert' : 'Sunday Worship'}
+                    required={draftEventType === 'special_event'}
+                  />
+                </label>
+              </div>
+              <button type="submit" className="btn-secondary" disabled={saving}>
+                {saving ? 'Saving…' : 'Save lineup details'}
+              </button>
+            </form>
+          )}
           {isLeader && lineup.status === 'published' && (
             <p className="lineup-management-note">
               Published lineups are read-only. Create a replacement draft to add or remove songs.

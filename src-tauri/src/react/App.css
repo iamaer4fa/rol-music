@@ -434,6 +434,42 @@ h3 {
   font-size: 0.82rem;
 }
 
+.dashboard-upcoming-events {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-upcoming-events li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dashboard-upcoming-events li:last-child {
+  border-bottom: 0;
+}
+
+.dashboard-upcoming-events li > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.dashboard-upcoming-events span {
+  color: var(--muted-text);
+  font-size: 0.82rem;
+}
+
+.dashboard-upcoming-events a {
+  flex: 0 0 auto;
+  text-decoration: none;
+}
+
 .dashboard-actions a {
   text-decoration: none;
 }
@@ -967,6 +1003,18 @@ h3 {
   font-weight: 600;
 }
 
+.lineup-service-fields .lineup-title-field {
+  grid-column: 1 / -1;
+}
+
+.lineup-event-details {
+  margin: 1rem 0;
+}
+
+.lineup-event-details > button {
+  margin-top: 0.25rem;
+}
+
 .lineup-item-fields .lineup-song-field,
 .lineup-item-fields .lineup-transition-field {
   grid-column: 1 / -1;
@@ -1463,6 +1511,11 @@ tbody tr:hover td {
   .dashboard-service-heading,
   .dashboard-actions {
     flex-wrap: wrap;
+  }
+
+  .dashboard-upcoming-events li {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .dashboard-service-songs,
